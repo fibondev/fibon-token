@@ -1,12 +1,13 @@
-# Fibon Token
+# Fibon Token System
 
-# Deploying Fibon Token System via Remix
+This README provides instructions for deploying the Fibon Token system using Remix IDE.
 
 ## Prerequisites
 
 - Access to [Remix IDE](https://remix.ethereum.org/)
 - MetaMask or similar web3 wallet
 - Sufficient ETH for gas fees
+- Understanding of Ethereum and smart contract deployment
 
 ## Deployment Steps
 
@@ -33,3 +34,39 @@
 3. In the "Deploy" section, provide:
    - `_logic`: Address of FibonToken implementation
    - `_data`: ABI-encoded `initialize` function call with multisig address
+
+### 4. Deploy ICO Contract
+
+1. Load `ICO.sol` into Remix
+2. Compile the contract
+3. Deploy with parameters:
+   - `initialOwner`: Address of the contract owner
+   - `_token`: Address of the FibonProxy contract
+   - `_rate`: Token rate
+   - `_startTime`: ICO start time
+   - `_endTime`: ICO end time
+   - `_hardCap`: Maximum amount to be raised
+
+### 5. Deploy Vesting Contract
+
+1. Load `Vesting.sol` into Remix
+2. Compile the contract
+3. Deploy with parameters:
+   - `initialOwner`: Address of the contract owner
+   - `_token`: Address of the FibonProxy contract
+   - `_cliff`: Cliff period in seconds
+   - `_duration`: Total vesting duration in seconds
+
+## Post-Deployment Steps
+
+1. Fund the ICO contract with tokens for sale
+2. Set up vesting schedules in the Vesting contract
+3. Transfer ownership of the FibonToken (via proxy) to the FibonMultiSig
+
+
+## Upgradeability
+
+The FibonToken uses the UUPS (Universal Upgradeable Proxy Standard) pattern. To upgrade:
+
+1. Deploy a new implementation of FibonToken
+2. Use the FibonMultiSig to call the upgrade function on the proxy
