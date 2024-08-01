@@ -13,7 +13,26 @@ contract FibonICO is Ownable, ReentrancyGuard {
     uint256 public hardCap;
     uint256 public totalRaised;
 
-    event TokensPurchased(address indexed buyer, uint256 amount, uint256 cost);
+    uint256 public constant PRELAUNCH_CLIFF = 90 days;
+    uint256 public constant PRELAUNCH_VESTING = 90 days;
+
+    struct Phase {
+        uint256 supply;
+        uint256 sold;
+        uint256 startTime;
+        uint256 endTime;
+    }
+
+    Phase public preLaunchSale;
+    Phase public ico1;
+    Phase public ico2;
+    Phase public ico3;
+
+    mapping(address => uint256) public preLaunchPurchases;
+    mapping(address => uint256) public preLaunchClaimTime;
+
+    event TokensPurchased(address indexed buyer, uint256 amount, uint256 cost, uint8 phase);
+    event TokensClaimed(address indexed buyer, uint256 amount);
 
     constructor(
         address initialOwner,
@@ -28,20 +47,67 @@ contract FibonICO is Ownable, ReentrancyGuard {
         startTime = _startTime;
         endTime = _endTime;
         hardCap = _hardCap;
+
+        preLaunchSale = Phase(58820000 * 10**18, 0, _startTime, _startTime + 30 days);
+        ico1 = Phase(58820000 * 10**18, 0, _startTime + 30 days, _startTime + 60 days);
+        ico2 = Phase(44000000 * 10**18, 0, _startTime + 60 days, _startTime + 90 days);
+        ico3 = Phase(25176000 * 10**18, 0, _startTime + 90 days, _endTime);
     }
 
-    function buyTokens() external payable nonReentrant {
+    function buyTokens(uint8 _phase) external payable nonReentrant {
         require(block.timestamp >= startTime && block.timestamp <= endTime, "ICO is not active");
         require(msg.value > 0, "Must send ETH to buy tokens");
         require(totalRaised + msg.value <= hardCap, "Hard cap reached");
 
+        Phase storage phase = getPhase(_phase);
+        require(block.timestamp >= phase.startTime && block.timestamp <= phase.endTime, "Phase is not active");
+
         uint256 tokens = msg.value * rate;
-        require(token.balanceOf(address(this)) >= tokens, "Not enough tokens in the contract");
+        require(phase.sold + tokens <= phase.supply, "Exceeds phase supply");
 
+        phase.sold += tokens;
         totalRaised += msg.value;
-        token.transfer(msg.sender, tokens);
 
-        emit TokensPurchased(msg.sender, tokens, msg.value);
+        if (_phase == 0) {
+            preLaunchPurchases[msg.sender] += tokens;
+            preLaunchClaimTime[msg.sender] = block.timestamp + PRELAUNCH_CLIFF;
+        } else {
+            token.transfer(msg.sender, tokens);
+        }
+
+        emit TokensPurchased(msg.sender, tokens, msg.value, _phase);
+    }
+
+    function claimPreLaunchTokens() external nonReentrant {
+        require(block.timestamp >= preLaunchClaimTime[msg.sender], "Cliff period not over");
+        uint256 claimableAmount = calculateClaimableAmount(msg.sender);
+        require(claimableAmount > 0, "No tokens to claim");
+
+        preLaunchPurchases[msg.sender] -= claimableAmount;
+        token.transfer(msg.sender, claimableAmount);
+
+        emit TokensClaimed(msg.sender, claimableAmount);
+    }
+
+    function calculateClaimableAmount(address _buyer) public view returns (uint256) {
+        if (block.timestamp < preLaunchClaimTime[_buyer]) {
+            return 0;
+        }
+        uint256 totalVestingTime = PRELAUNCH_VESTING;
+        uint256 elapsedTime = block.timestamp - preLaunchClaimTime[_buyer];
+        if (elapsedTime >= totalVestingTime) {
+            return preLaunchPurchases[_buyer];
+        } else {
+            return (preLaunchPurchases[_buyer] * elapsedTime) / totalVestingTime;
+        }
+    }
+
+    function getPhase(uint8 _phase) internal view returns (Phase storage) {
+        if (_phase == 0) return preLaunchSale;
+        if (_phase == 1) return ico1;
+        if (_phase == 2) return ico2;
+        if (_phase == 3) return ico3;
+        revert("Invalid phase");
     }
 
     function withdrawFunds() external onlyOwner {
