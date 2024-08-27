@@ -33,6 +33,8 @@ contract FibonICO is Ownable, ReentrancyGuard {
 
     event TokensPurchased(address indexed buyer, uint256 amount, uint256 cost, uint8 phase);
     event TokensClaimed(address indexed buyer, uint256 amount);
+    event RateUpdated(uint256 newRate);
+    event TimesUpdated(uint256 newStartTime, uint256 newEndTime);
 
     constructor(
         address initialOwner,
@@ -72,7 +74,7 @@ contract FibonICO is Ownable, ReentrancyGuard {
             preLaunchPurchases[msg.sender] += tokens;
             preLaunchClaimTime[msg.sender] = block.timestamp + PRELAUNCH_CLIFF;
         } else {
-            token.transfer(msg.sender, tokens);
+            token.safeTransfer(msg.sender, tokens);
         }
 
         emit TokensPurchased(msg.sender, tokens, msg.value, _phase);
@@ -84,7 +86,7 @@ contract FibonICO is Ownable, ReentrancyGuard {
         require(claimableAmount > 0, "No tokens to claim");
 
         preLaunchPurchases[msg.sender] -= claimableAmount;
-        token.transfer(msg.sender, claimableAmount);
+        token.safeTransfer(msg.sender, claimableAmount);
 
         emit TokensClaimed(msg.sender, claimableAmount);
     }
@@ -117,11 +119,19 @@ contract FibonICO is Ownable, ReentrancyGuard {
 
     function updateRate(uint256 newRate) external onlyOwner {
         rate = newRate;
+        emit RateUpdated(newRate);
     }
 
     function updateTimes(uint256 newStartTime, uint256 newEndTime) external onlyOwner {
         require(newStartTime < newEndTime, "Invalid time range");
         startTime = newStartTime;
         endTime = newEndTime;
+        emit TimesUpdated(newStartTime, newEndTime);
+    }
+
+    function extendEndTime(uint256 newEndTime) external onlyOwner {
+        require(newEndTime > endTime, "New end time must be after current end time");
+        endTime = newEndTime;
+        emit TimesUpdated(startTime, newEndTime);
     }
 }
