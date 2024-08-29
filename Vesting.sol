@@ -3,8 +3,11 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract FibonVesting is Ownable {
+    using SafeERC20 for IERC20;
+
     IERC20 public token;
     uint256 public cliff;
     uint256 public duration;
@@ -41,7 +44,7 @@ contract FibonVesting is Ownable {
         require(releasableAmount > 0, "No tokens available for release");
 
         releasedAmount[msg.sender] += releasableAmount;
-        token.transfer(msg.sender, releasableAmount);
+        token.safeTransfer(msg.sender, releasableAmount);
 
         emit TokensReleased(msg.sender, releasableAmount);
     }
@@ -60,5 +63,23 @@ contract FibonVesting is Ownable {
             uint256 vestedAmount = (totalAllocation[_beneficiary] * elapsedTime) / totalVestingTime;
             return vestedAmount - releasedAmount[_beneficiary];
         }
+    }
+
+    function setToken(IERC20 _newToken) external onlyOwner {
+        token = _newToken;
+    }
+
+    function revokeBeneficiary(address _beneficiary) external onlyOwner {
+        uint256 remainingAllocation = totalAllocation[_beneficiary] - releasedAmount[_beneficiary];
+        if (remainingAllocation > 0) {
+            token.safeTransfer(owner(), remainingAllocation);
+        }
+        totalAllocation[_beneficiary] = releasedAmount[_beneficiary];
+    }
+
+    function updateVestingSchedule(uint256 newCliff, uint256 newDuration) external onlyOwner {
+        require(newCliff > 0 && newDuration > newCliff, "Invalid vesting schedule");
+        cliff = newCliff;
+        duration = newDuration;
     }
 }
