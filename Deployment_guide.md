@@ -123,10 +123,7 @@ Once a transaction is submitted, it needs to be confirmed by the required number
 
 ### Executing a Transaction
 
-After the required number of confirmations, the transaction can be executed. Any owner can call the `executeTransaction` method with the transaction ID.
-
-1. Go to the deployed FibonMultiSig contract in Remix.
-2. Call the `executeTransaction` method with the transaction ID (e.g., `0`).
+After the required number of confirmations, the transaction is automatically executed. 
 
 ### Example Workflow: Transferring 1 ETH
 
@@ -148,13 +145,6 @@ After the required number of confirmations, the transaction can be executed. Any
    - Enter the `transactionId` obtained from the previous step.
    - Click the "transact" button to confirm the transaction.
 
-3. **Owner 1 Executes the Transaction:**
-   - Owner 1 should open Remix IDE and load the same `FibonMultiSig` contract.
-   - Go to the "Deployed Contracts" section and find the `FibonMultiSig` contract.
-   - Expand the contract and find the `executeTransaction` function.
-   - Enter the `transactionId` obtained from the first step.
-   - Click the "transact" button to execute the transaction.
-
 ### Another Multisig Example: Minting Tokens
 
 1. **Owner 1 Submits a Transaction to Mint Tokens:**
@@ -174,13 +164,6 @@ After the required number of confirmations, the transaction can be executed. Any
    - Expand the contract and find the `confirmTransaction` function.
    - Enter the `transactionId` obtained from the previous step.
    - Click the "transact" button to confirm the transaction.
-
-3. **Owner 1 Executes the Transaction:**
-   - Owner 1 should open Remix IDE and load the same `FibonMultiSig` contract.
-   - Go to the "Deployed Contracts" section and find the `FibonMultiSig` contract.
-   - Expand the contract and find the `executeTransaction` function.
-   - Enter the `transactionId` obtained from the first step.
-   - Click the "transact" button to execute the transaction.
 
 ## Upgradeability
 

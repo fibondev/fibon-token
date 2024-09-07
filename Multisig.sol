@@ -94,4 +94,10 @@ contract FibonMultiSig is Context {
         }
         return false;
     }
+
+    receive() external payable {
+    }
+
+    fallback() external payable {
+    }
 }
