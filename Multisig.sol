@@ -69,7 +69,9 @@ contract FibonMultiSig is Context {
         transaction.confirmations += 1;
         confirmations[transactionId][_msgSender()] = true;
         emit Confirmation(_msgSender(), transactionId);
-        executeTransaction(transactionId);
+        if (transaction.confirmations == required) {
+            executeTransaction(transactionId);
+        }
     }
 
     function executeTransaction(uint transactionId) public transactionExists(transactionId) notExecuted(transactionId) {
