@@ -125,13 +125,6 @@ contract FibonICO is Ownable, ReentrancyGuard {
         emit RateUpdated(newRate);
     }
 
-    function updateTimes(uint256 newStartTime, uint256 newEndTime) external onlyOwner {
-        require(newStartTime < newEndTime, "Invalid time range");
-        startTime = newStartTime;
-        endTime = newEndTime;
-        emit TimesUpdated(newStartTime, newEndTime);
-    }
-
     function extendEndTime(uint256 newEndTime) external onlyOwner {
         require(newEndTime > endTime, "New end time must be after current end time");
         endTime = newEndTime;
