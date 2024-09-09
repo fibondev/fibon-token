@@ -65,10 +65,6 @@ To convert a specific date and time to a Unix timestamp, you can use various onl
 ### 5. Deploy Vesting Contract
 
 1. Create a new file named `Vesting.sol` and paste the code from `Vesting.sol`:
-   ```solidity:Vesting.sol
-   startLine: 1
-   endLine: 85
-   ```
 2. Compile the contract.
 3. Deploy the contract with the following parameters:
    - `initialOwner`: Address of the contract owner (e.g., `0xYourMetaMaskAddress`).
