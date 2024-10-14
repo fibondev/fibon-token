@@ -78,6 +78,9 @@ contract FibonICO is Ownable, ReentrancyGuard {
     /// @notice Event emitted when the ICO times are updated.
     event TimesUpdated(uint256 newStartTime, uint256 newEndTime);
 
+    /// @notice Event emitted when ETH is received by the contract.
+    event EthReceived(address indexed sender, uint256 amount);
+
     /**
      * @dev Initializes the contract with initial parameters.
      * @param _token The ERC20 token being sold.
@@ -123,6 +126,8 @@ contract FibonICO is Ownable, ReentrancyGuard {
 
         phase.sold += tokens;
         totalRaised += msg.value;
+
+        emit EthReceived(msg.sender, msg.value);
 
         if (_phase == 0) {
             preLaunchPurchases[msg.sender] += tokens;
@@ -187,11 +192,14 @@ contract FibonICO is Ownable, ReentrancyGuard {
     }
 
     /**
-     * @notice Allows the owner to withdraw the raised funds after the ICO has ended.
+     * @notice Allows the owner to withdraw the raised funds after the ICO has ended to a specified address.
+     * @param _recipient The address to receive the withdrawn funds.
      */
-    function withdrawFunds() external onlyOwner {
+    function withdrawFunds(address payable _recipient) external onlyOwner {
         require(block.timestamp > endTime, "ICO has not ended yet");
-        payable(owner()).transfer(address(this).balance);
+        require(_recipient != address(0), "Invalid recipient address");
+        uint256 balance = address(this).balance;
+        _recipient.transfer(balance);
     }
 
     /**
@@ -211,5 +219,20 @@ contract FibonICO is Ownable, ReentrancyGuard {
         require(newEndTime > endTime, "New end time must be after current end time");
         endTime = newEndTime;
         emit TimesUpdated(startTime, newEndTime);
+    }
+
+    /**
+     * @notice Receive function to accept Ether.
+     * @dev Emits a EthReceived event when ETH is received.
+     */
+    receive() external payable {
+        emit EthReceived(msg.sender, msg.value);
+    }
+
+    /**
+     * @notice Fallback function called for all messages sent to this contract, except plain Ether transfers.
+     */
+    fallback() external payable {
+        revert("FibonICO: Function does not exist or invalid data sent");
     }
 }

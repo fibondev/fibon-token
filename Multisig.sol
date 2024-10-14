@@ -137,6 +137,29 @@ contract FibonMultiSig is Context {
     }
 
     /**
+     * @notice Submits a withdrawal transaction.
+     * @dev Only an owner can call this function.
+     * @param destination Address to send the ETH to.
+     * @param amount Amount of ETH to withdraw.
+     * @return transactionId The ID of the submitted withdrawal transaction.
+     */
+    function submitWithdrawal(address payable destination, uint amount) public onlyOwner returns (uint transactionId) {
+        require(address(this).balance >= amount, "Insufficient balance");
+
+        transactionId = transactionCount;
+        transactions[transactionId] = Transaction({
+            destination: destination,
+            value: amount,
+            data: "",
+            executed: false,
+            confirmations: 0
+        });
+        transactionCount += 1;
+        emit Submission(transactionId);
+        confirmTransaction(transactionId);
+    }
+
+    /**
      * @notice Executes a transaction if it has enough confirmations.
      * @dev The transaction must exist, not be executed, and have enough confirmations.
      * @param transactionId The ID of the transaction to execute.
@@ -157,8 +180,12 @@ contract FibonMultiSig is Context {
 
     /**
      * @notice Receive function to accept Ether.
+     * @dev Emits a Deposit event when ETH is received.
      */
+    event Deposit(address indexed sender, uint amount);
+
     receive() external payable {
+        emit Deposit(msg.sender, msg.value);
     }
 
     /**
