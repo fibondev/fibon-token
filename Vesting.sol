@@ -4,12 +4,13 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title FibonVesting
  * @dev A token vesting contract that handles vesting schedules with non-cumulative percentages over specific periods.
  */
-contract FibonVesting is Ownable {
+contract FibonVesting is Ownable, Pausable {
     using SafeERC20 for IERC20;
 
     /// @notice The ERC20 token being vested.
@@ -235,6 +236,8 @@ contract FibonVesting is Ownable {
     ) external onlyOwner {
         require(vestingTypes[typeId].length == 0, "Vesting type already exists");
 
+        _validatePhases(phases);
+
         uint256 totalPercentage;
         for (uint256 i = 0; i < phases.length; i++) {
             require(phases[i].end >= phases[i].start, "Phase end must be after or equal to start");
@@ -260,13 +263,16 @@ contract FibonVesting is Ownable {
         address _beneficiary,
         uint8 typeId,
         uint256 _amount
-    ) external onlyOwner {
+    ) external onlyOwner whenNotPaused {
         require(_beneficiary != address(0), "Invalid beneficiary address");
         require(_amount > 0, "Amount must be greater than 0");
         require(vestingSchedules[_beneficiary].startTime == 0, "Vesting schedule already exists");
 
         VestingPhase[] storage vtPhases = vestingTypes[typeId];
         require(vtPhases.length > 0, "Invalid vesting type");
+
+        // Check for sufficient contract balance
+        require(token.balanceOf(address(this)) >= _amount, "Insufficient contract balance");
 
         // Copy vesting phases
         VestingPhase[] memory phases = new VestingPhase[](vtPhases.length);
@@ -290,7 +296,7 @@ contract FibonVesting is Ownable {
      * @notice Allows a beneficiary to release their vested tokens.
      * @dev The function will revert if no tokens are available for release.
      */
-    function release() external {
+    function release() external whenNotPaused {
         VestingSchedule storage schedule = vestingSchedules[msg.sender];
         require(schedule.startTime != 0, "No vesting schedule for caller");
 
@@ -331,7 +337,15 @@ contract FibonVesting is Ownable {
                 totalVested += (allocation * phase.percentage) / 100;
             } else {
                 uint256 phaseDuration = phaseEndTime - phaseStartTime;
+                require(phaseDuration > 0, "Invalid phase duration");
                 uint256 timeInPhase = currentTime - phaseStartTime;
+                
+                // Preventing potential overflow by checking multiplication results
+                uint256 timeSquared = timeInPhase * timeInPhase;
+                require(timeSquared / timeInPhase == timeInPhase, "Overflow in time calculation");
+                
+                uint256 durationSquared = phaseDuration * phaseDuration;
+                require(durationSquared / phaseDuration == phaseDuration, "Overflow in duration calculation");
                 
                 // Applying quadratic easing for non-linear vesting (t/d)^2
                 uint256 progress = (timeInPhase * timeInPhase * 1e18) / (phaseDuration * phaseDuration);
@@ -350,7 +364,7 @@ contract FibonVesting is Ownable {
      *      The function will revert if there are no tokens to revoke.
      * @param _beneficiary The address of the beneficiary to revoke.
      */
-    function revokeBeneficiary(address _beneficiary) external onlyOwner {
+    function revokeBeneficiary(address _beneficiary) external onlyOwner whenNotPaused {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         require(schedule.startTime != 0, "No vesting schedule for beneficiary");
 
@@ -444,4 +458,32 @@ contract FibonVesting is Ownable {
         // Return percentage in basis points (100% = 10000)
         return (totalVested * 10000) / totalAllocation[_beneficiary];
     }
+
+    function _validatePhases(VestingPhase[] memory phases) internal pure {
+        require(phases.length > 0, "Empty phases array");
+        
+        for (uint256 i = 1; i < phases.length; i++) {
+            require(
+                phases[i].start >= phases[i-1].end,
+                "Phases must be sequential"
+            );
+        }
+    }
+
+    /**
+     * @notice Pauses all token transfers and vesting operations
+     * @dev Only the owner can call this function
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /**
+     * @notice Unpauses the contract and resumes all operations
+     * @dev Only the owner can call this function
+     */
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
 }
