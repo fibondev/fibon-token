@@ -317,6 +317,7 @@ contract FibonVesting is Ownable {
         uint256 totalVested;
         uint256 currentTime = block.timestamp;
         uint256 startTime = schedule.startTime;
+        uint256 allocation = totalAllocation[_beneficiary];
 
         for (uint256 i = 0; i < schedule.phases.length; i++) {
             VestingPhase storage phase = schedule.phases[i];
@@ -324,16 +325,18 @@ contract FibonVesting is Ownable {
             uint256 phaseEndTime = startTime + phase.end;
 
             if (currentTime < phaseStartTime) {
-                // Phase not started yet
                 continue;
             } else if (currentTime >= phaseEndTime) {
                 // Phase fully completed
-                totalVested += (totalAllocation[_beneficiary] * phase.percentage) / 100;
+                totalVested += (allocation * phase.percentage) / 100;
             } else {
-                // Phase partially completed
                 uint256 phaseDuration = phaseEndTime - phaseStartTime;
                 uint256 timeInPhase = currentTime - phaseStartTime;
-                uint256 vestedInPhase = (totalAllocation[_beneficiary] * phase.percentage * timeInPhase) / (phaseDuration * 100);
+                
+                // Applying quadratic easing for non-linear vesting (t/d)^2
+                uint256 progress = (timeInPhase * timeInPhase * 1e18) / (phaseDuration * phaseDuration);
+                uint256 vestedInPhase = (allocation * phase.percentage * progress) / (100 * 1e18);
+                
                 totalVested += vestedInPhase;
             }
         }
@@ -373,5 +376,72 @@ contract FibonVesting is Ownable {
     function recoverERC20(address _token, uint256 _amount) external onlyOwner {
         require(_token != address(token), "Cannot recover vested token");
         IERC20(_token).safeTransfer(owner(), _amount);
+    }
+
+    /**
+     * @notice Returns the total amount of tokens earned (vested) at the current moment
+     * @param _beneficiary The address of the beneficiary
+     * @return totalVested The total amount of tokens vested so far
+     * @return totalReleased The total amount already released to the beneficiary
+     * @return releasable The amount that can be released now
+     */
+    function getVestedAmount(address _beneficiary) 
+        public 
+        view 
+        returns (
+            uint256 totalVested,
+            uint256 totalReleased,
+            uint256 releasable
+        ) 
+    {
+        VestingSchedule storage schedule = vestingSchedules[_beneficiary];
+        if (schedule.startTime == 0) {
+            return (0, 0, 0);
+        }
+
+        uint256 currentTime = block.timestamp;
+        uint256 startTime = schedule.startTime;
+        uint256 allocation = totalAllocation[_beneficiary];
+
+        for (uint256 i = 0; i < schedule.phases.length; i++) {
+            VestingPhase storage phase = schedule.phases[i];
+            uint256 phaseStartTime = startTime + phase.start;
+            uint256 phaseEndTime = startTime + phase.end;
+
+            if (currentTime < phaseStartTime) {
+                continue;
+            } else if (currentTime >= phaseEndTime) {
+                // Phase fully completed
+                totalVested += (allocation * phase.percentage) / 100;
+            } else {
+                // Phase partially completed - non-linear vesting
+                uint256 phaseDuration = phaseEndTime - phaseStartTime;
+                uint256 timeInPhase = currentTime - phaseStartTime;
+                
+                // Apply quadratic easing for non-linear vesting
+                uint256 progress = (timeInPhase * timeInPhase * 1e18) / (phaseDuration * phaseDuration);
+                uint256 vestedInPhase = (allocation * phase.percentage * progress) / (100 * 1e18);
+                
+                totalVested += vestedInPhase;
+            }
+        }
+
+        totalReleased = schedule.releasedAmount;
+        releasable = totalVested - totalReleased;
+        
+        return (totalVested, totalReleased, releasable);
+    }
+
+    /**
+     * @notice Returns the percentage of tokens vested at the current moment
+     * @param _beneficiary The address of the beneficiary
+     * @return percentage The percentage of total allocation vested (in basis points, e.g., 5000 = 50%)
+     */
+    function getVestedPercentage(address _beneficiary) public view returns (uint256 percentage) {
+        (uint256 totalVested, , ) = getVestedAmount(_beneficiary);
+        if (totalAllocation[_beneficiary] == 0) return 0;
+        
+        // Return percentage in basis points (100% = 10000)
+        return (totalVested * 10000) / totalAllocation[_beneficiary];
     }
 }
