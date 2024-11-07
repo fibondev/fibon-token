@@ -4,13 +4,12 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title FibonVesting
  * @dev A token vesting contract that handles vesting schedules with non-cumulative percentages over specific periods.
  */
-contract FibonVesting is Ownable, Pausable {
+contract FibonVesting is Ownable {
     using SafeERC20 for IERC20;
 
     /// @notice The ERC20 token being vested.
@@ -24,6 +23,7 @@ contract FibonVesting is Ownable, Pausable {
         uint256 startTime;       // Vesting start time
         uint256 releasedAmount;  // Amount of tokens already released
         VestingPhase[] phases;   // Array of vesting phases
+        bool isDisabled;         // Flag to disable the schedule
     }
 
     /// @notice Struct to define a vesting phase.
@@ -60,6 +60,14 @@ contract FibonVesting is Ownable, Pausable {
     /// @param beneficiary The address of the beneficiary whose vesting is revoked.
     /// @param amount The amount of tokens revoked.
     event VestingRevoked(address indexed beneficiary, uint256 amount);
+
+    /// @notice Emitted when a vesting schedule is disabled.
+    /// @param beneficiary The address of the beneficiary whose schedule is disabled.
+    event VestingScheduleDisabled(address indexed beneficiary);
+
+    /// @notice Emitted when a vesting schedule is enabled.
+    /// @param beneficiary The address of the beneficiary whose schedule is enabled.
+    event VestingScheduleEnabled(address indexed beneficiary);
 
     /**
      * @dev Initializes the vesting contract.
@@ -263,7 +271,7 @@ contract FibonVesting is Ownable, Pausable {
         address _beneficiary,
         uint8 typeId,
         uint256 _amount
-    ) external onlyOwner whenNotPaused {
+    ) external onlyOwner {
         require(_beneficiary != address(0), "Invalid beneficiary address");
         require(_amount > 0, "Amount must be greater than 0");
         require(vestingSchedules[_beneficiary].startTime == 0, "Vesting schedule already exists");
@@ -283,7 +291,8 @@ contract FibonVesting is Ownable, Pausable {
         vestingSchedules[_beneficiary] = VestingSchedule({
             startTime: block.timestamp,
             releasedAmount: 0,
-            phases: phases
+            phases: phases,
+            isDisabled: false
         });
 
         totalAllocation[_beneficiary] = _amount;
@@ -296,9 +305,10 @@ contract FibonVesting is Ownable, Pausable {
      * @notice Allows a beneficiary to release their vested tokens.
      * @dev The function will revert if no tokens are available for release.
      */
-    function release() external whenNotPaused {
+    function release() external {
         VestingSchedule storage schedule = vestingSchedules[msg.sender];
         require(schedule.startTime != 0, "No vesting schedule for caller");
+        require(!schedule.isDisabled, "Vesting schedule is disabled");
 
         uint256 releasableAmount = calculateReleasableAmount(msg.sender);
         require(releasableAmount > 0, "No tokens available for release");
@@ -316,7 +326,7 @@ contract FibonVesting is Ownable, Pausable {
      */
     function calculateReleasableAmount(address _beneficiary) public view returns (uint256) {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
-        if (schedule.startTime == 0) {
+        if (schedule.startTime == 0 || schedule.isDisabled) {
             return 0;
         }
 
@@ -364,7 +374,7 @@ contract FibonVesting is Ownable, Pausable {
      *      The function will revert if there are no tokens to revoke.
      * @param _beneficiary The address of the beneficiary to revoke.
      */
-    function revokeBeneficiary(address _beneficiary) external onlyOwner whenNotPaused {
+    function revokeBeneficiary(address _beneficiary) external onlyOwner {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         require(schedule.startTime != 0, "No vesting schedule for beneficiary");
 
@@ -409,7 +419,7 @@ contract FibonVesting is Ownable, Pausable {
         ) 
     {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
-        if (schedule.startTime == 0) {
+        if (schedule.startTime == 0 || schedule.isDisabled) {
             return (0, 0, 0);
         }
 
@@ -471,19 +481,23 @@ contract FibonVesting is Ownable, Pausable {
     }
 
     /**
-     * @notice Pauses all token transfers and vesting operations
-     * @dev Only the owner can call this function
+     * @notice Allows the owner to toggle a vesting schedule's status.
+     * @dev Only the owner can call this function.
+     * @param _beneficiary The address of the beneficiary whose schedule is to be toggled.
+     * @param _disabled The new status of the schedule.
      */
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    /**
-     * @notice Unpauses the contract and resumes all operations
-     * @dev Only the owner can call this function
-     */
-    function unpause() external onlyOwner {
-        _unpause();
+    function toggleVestingSchedule(address _beneficiary, bool _disabled) external onlyOwner {
+        VestingSchedule storage schedule = vestingSchedules[_beneficiary];
+        require(schedule.startTime != 0, "No vesting schedule for beneficiary");
+        require(schedule.isDisabled != _disabled, "Schedule already in desired state");
+        
+        schedule.isDisabled = _disabled;
+        
+        if (_disabled) {
+            emit VestingScheduleDisabled(_beneficiary);
+        } else {
+            emit VestingScheduleEnabled(_beneficiary);
+        }
     }
 
 }
