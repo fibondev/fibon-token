@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -73,7 +73,7 @@ contract FibonVesting is Ownable {
      * @dev Initializes the vesting contract.
      * @param _token The ERC20 token to be vested.
      */
-    constructor(IERC20 _token) {
+    constructor(IERC20 _token, address initialOwner) Ownable(initialOwner) {
         token = _token;
 
         // Initialize predefined vesting types
@@ -88,17 +88,17 @@ contract FibonVesting is Ownable {
         vestingTypes[1].push(VestingPhase({
             start: 0,
             end: 6 * 30 days,
-            percentage: 10
+            percentage: 20
         }));
         vestingTypes[1].push(VestingPhase({
             start: 6 * 30 days,
             end: 18 * 30 days,
-            percentage: 30
+            percentage: 35
         }));
         vestingTypes[1].push(VestingPhase({
             start: 18 * 30 days,
             end: 36 * 30 days,
-            percentage: 60
+            percentage: 45
         }));
         emit VestingTypeAdded(1);
 
@@ -107,17 +107,17 @@ contract FibonVesting is Ownable {
         vestingTypes[2].push(VestingPhase({
             start: 3 * 30 days, // After cliff at month 3
             end: 3 * 30 days,   // Immediate release at month 3
-            percentage: 10
+            percentage: 20
         }));
         vestingTypes[2].push(VestingPhase({
             start: 3 * 30 days,
             end: 6 * 30 days,
-            percentage: 30
+            percentage: 35
         }));
         vestingTypes[2].push(VestingPhase({
             start: 6 * 30 days,
             end: 6 * 30 days, // Immediate release at month 6
-            percentage: 60
+            percentage: 45
         }));
         emit VestingTypeAdded(2);
 
@@ -126,17 +126,17 @@ contract FibonVesting is Ownable {
         vestingTypes[3].push(VestingPhase({
             start: 3 * 30 days,
             end: 4 * 30 days,
-            percentage: 10
+            percentage: 20
         }));
         vestingTypes[3].push(VestingPhase({
             start: 4 * 30 days,
             end: 8 * 30 days,
-            percentage: 30
+            percentage: 35
         }));
         vestingTypes[3].push(VestingPhase({
             start: 8 * 30 days,
             end: 12 * 30 days,
-            percentage: 60
+            percentage: 45
         }));
         emit VestingTypeAdded(3);
 
@@ -145,17 +145,17 @@ contract FibonVesting is Ownable {
         vestingTypes[4].push(VestingPhase({
             start: 6 * 30 days, // After cliff at month 6
             end: 6 * 30 days,   // Immediate release at month 6
-            percentage: 10
+            percentage: 20
         }));
         vestingTypes[4].push(VestingPhase({
             start: 6 * 30 days,
             end: 9 * 30 days,
-            percentage: 30
+            percentage: 35
         }));
         vestingTypes[4].push(VestingPhase({
             start: 9 * 30 days,
             end: 12 * 30 days,
-            percentage: 60
+            percentage: 45
         }));
         emit VestingTypeAdded(4);
 
@@ -163,17 +163,17 @@ contract FibonVesting is Ownable {
         vestingTypes[5].push(VestingPhase({
             start: 0,
             end: 6 * 30 days,
-            percentage: 10
+            percentage: 20
         }));
         vestingTypes[5].push(VestingPhase({
             start: 6 * 30 days,
             end: 12 * 30 days,
-            percentage: 30
+            percentage: 35
         }));
         vestingTypes[5].push(VestingPhase({
             start: 12 * 30 days,
             end: 24 * 30 days,
-            percentage: 60
+            percentage: 45
         }));
         emit VestingTypeAdded(5);
 
@@ -181,17 +181,17 @@ contract FibonVesting is Ownable {
         vestingTypes[6].push(VestingPhase({
             start: 0,
             end: 6 * 30 days,
-            percentage: 10
+            percentage: 20
         }));
         vestingTypes[6].push(VestingPhase({
             start: 6 * 30 days,
             end: 18 * 30 days,
-            percentage: 30
+            percentage: 35
         }));
         vestingTypes[6].push(VestingPhase({
             start: 18 * 30 days,
             end: 36 * 30 days,
-            percentage: 60
+            percentage: 45
         }));
         emit VestingTypeAdded(6);
 
@@ -199,17 +199,17 @@ contract FibonVesting is Ownable {
         vestingTypes[7].push(VestingPhase({
             start: 0,
             end: 2 * 30 days,
-            percentage: 10
+            percentage: 20
         }));
         vestingTypes[7].push(VestingPhase({
             start: 2 * 30 days,
             end: 4 * 30 days,
-            percentage: 30
+            percentage: 35
         }));
         vestingTypes[7].push(VestingPhase({
             start: 4 * 30 days,
             end: 6 * 30 days,
-            percentage: 60
+            percentage: 45
         }));
         emit VestingTypeAdded(7);
 
@@ -218,17 +218,17 @@ contract FibonVesting is Ownable {
         vestingTypes[8].push(VestingPhase({
             start: 6 * 30 days, // After cliff at month 6
             end: 6 * 30 days,   // Immediate release at month 6
-            percentage: 10
+            percentage: 20
         }));
         vestingTypes[8].push(VestingPhase({
             start: 6 * 30 days,
             end: 12 * 30 days,
-            percentage: 30
+            percentage: 35
         }));
         vestingTypes[8].push(VestingPhase({
             start: 12 * 30 days,
             end: 24 * 30 days,
-            percentage: 60
+            percentage: 45
         }));
         emit VestingTypeAdded(8);
     }
@@ -279,21 +279,17 @@ contract FibonVesting is Ownable {
         VestingPhase[] storage vtPhases = vestingTypes[typeId];
         require(vtPhases.length > 0, "Invalid vesting type");
 
-        // Check for sufficient contract balance
         require(token.balanceOf(address(this)) >= _amount, "Insufficient contract balance");
 
-        // Copy vesting phases
-        VestingPhase[] memory phases = new VestingPhase[](vtPhases.length);
-        for (uint256 i = 0; i < vtPhases.length; i++) {
-            phases[i] = vtPhases[i];
-        }
+        // Create the schedule first
+        vestingSchedules[_beneficiary].startTime = block.timestamp;
+        vestingSchedules[_beneficiary].releasedAmount = 0;
+        vestingSchedules[_beneficiary].isDisabled = false;
 
-        vestingSchedules[_beneficiary] = VestingSchedule({
-            startTime: block.timestamp,
-            releasedAmount: 0,
-            phases: phases,
-            isDisabled: false
-        });
+        // Push phases one by one
+        for (uint256 i = 0; i < vtPhases.length; i++) {
+            vestingSchedules[_beneficiary].phases.push(vtPhases[i]);
+        }
 
         totalAllocation[_beneficiary] = _amount;
         totalAllocated += _amount;
@@ -350,15 +346,8 @@ contract FibonVesting is Ownable {
                 require(phaseDuration > 0, "Invalid phase duration");
                 uint256 timeInPhase = currentTime - phaseStartTime;
                 
-                // Preventing potential overflow by checking multiplication results
-                uint256 timeSquared = timeInPhase * timeInPhase;
-                require(timeSquared / timeInPhase == timeInPhase, "Overflow in time calculation");
-                
-                uint256 durationSquared = phaseDuration * phaseDuration;
-                require(durationSquared / phaseDuration == phaseDuration, "Overflow in duration calculation");
-                
-                // Applying quadratic easing for non-linear vesting (t/d)^2
-                uint256 progress = (timeInPhase * timeInPhase * 1e18) / (phaseDuration * phaseDuration);
+                // Changed to linear vesting
+                uint256 progress = (timeInPhase * 1e18) / phaseDuration;
                 uint256 vestedInPhase = (allocation * phase.percentage * progress) / (100 * 1e18);
                 
                 totalVested += vestedInPhase;
@@ -438,12 +427,10 @@ contract FibonVesting is Ownable {
                 // Phase fully completed
                 totalVested += (allocation * phase.percentage) / 100;
             } else {
-                // Phase partially completed - non-linear vesting
                 uint256 phaseDuration = phaseEndTime - phaseStartTime;
                 uint256 timeInPhase = currentTime - phaseStartTime;
                 
-                // Apply quadratic easing for non-linear vesting
-                uint256 progress = (timeInPhase * timeInPhase * 1e18) / (phaseDuration * phaseDuration);
+                uint256 progress = (timeInPhase * 1e18) / phaseDuration;
                 uint256 vestedInPhase = (allocation * phase.percentage * progress) / (100 * 1e18);
                 
                 totalVested += vestedInPhase;
