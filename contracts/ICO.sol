@@ -32,10 +32,10 @@ contract FibonICO is Ownable, ReentrancyGuard {
     uint256 public totalRaised;
 
     /// @notice The cliff period before pre-launch tokens can be claimed.
-    uint256 public constant PRELAUNCH_CLIFF = 90 days;
+    uint256 public preLaunchCliff;
 
     /// @notice The vesting period over which pre-launch tokens are released.
-    uint256 public constant PRELAUNCH_VESTING = 90 days;
+    uint256 public preLaunchVesting;
 
     /// @notice Represents a phase in the ICO.
     struct Phase {
@@ -102,6 +102,10 @@ contract FibonICO is Ownable, ReentrancyGuard {
         endTime = _endTime;
         hardCap = _hardCap;
 
+        // Set default values
+        preLaunchCliff = 90 days;
+        preLaunchVesting = 90 days;
+
         // Initialize phases
         preLaunchSale = Phase(58820000 * 10**18, 0, _startTime, _startTime + 30 days);
         ico1 = Phase(58820000 * 10**18, 0, _startTime + 30 days, _startTime + 60 days);
@@ -132,7 +136,7 @@ contract FibonICO is Ownable, ReentrancyGuard {
         if (_phase == 0) {
             preLaunchPurchases[msg.sender] += tokens;
             if (preLaunchClaimTime[msg.sender] == 0) {
-                preLaunchClaimTime[msg.sender] = preLaunchSale.endTime + PRELAUNCH_CLIFF;
+                preLaunchClaimTime[msg.sender] = preLaunchSale.endTime + preLaunchCliff;
             }
         } else {
             token.safeTransfer(msg.sender, tokens);
@@ -165,7 +169,7 @@ contract FibonICO is Ownable, ReentrancyGuard {
             return 0;
         }
 
-        uint256 totalVestingTime = PRELAUNCH_VESTING;
+        uint256 totalVestingTime = preLaunchVesting;
         uint256 elapsedTime = block.timestamp - preLaunchClaimTime[_buyer];
 
         uint256 totalVestedAmount;
@@ -219,6 +223,24 @@ contract FibonICO is Ownable, ReentrancyGuard {
         require(newEndTime > endTime, "New end time must be after current end time");
         endTime = newEndTime;
         emit TimesUpdated(startTime, newEndTime);
+    }
+
+    /**
+     * @notice Allows the owner to update the cliff period
+     * @param newCliff The new cliff period in seconds
+     */
+    function updateCliffPeriod(uint256 newCliff) external onlyOwner {
+        require(newCliff > 0, "Cliff period must be greater than 0");
+        preLaunchCliff = newCliff;
+    }
+
+    /**
+     * @notice Allows the owner to update the vesting period
+     * @param newVesting The new vesting period in seconds
+     */
+    function updateVestingPeriod(uint256 newVesting) external onlyOwner {
+        require(newVesting > 0, "Vesting period must be greater than 0");
+        preLaunchVesting = newVesting;
     }
 
     /**
