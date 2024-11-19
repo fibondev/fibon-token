@@ -345,11 +345,11 @@ contract FibonVesting is Ownable {
                 uint256 phaseDuration = phaseEndTime - phaseStartTime;
                 require(phaseDuration > 0, "Invalid phase duration");
                 uint256 timeInPhase = currentTime - phaseStartTime;
-                
+
                 // Changed to linear vesting
                 uint256 progress = (timeInPhase * 1e18) / phaseDuration;
                 uint256 vestedInPhase = (allocation * phase.percentage * progress) / (100 * 1e18);
-                
+
                 totalVested += vestedInPhase;
             }
         }
@@ -398,14 +398,14 @@ contract FibonVesting is Ownable {
      * @return totalReleased The total amount already released to the beneficiary
      * @return releasable The amount that can be released now
      */
-    function getVestedAmount(address _beneficiary) 
-        public 
-        view 
+    function getVestedAmount(address _beneficiary)
+        public
+        view
         returns (
             uint256 totalVested,
             uint256 totalReleased,
             uint256 releasable
-        ) 
+        )
     {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         if (schedule.startTime == 0 || schedule.isDisabled) {
@@ -429,17 +429,17 @@ contract FibonVesting is Ownable {
             } else {
                 uint256 phaseDuration = phaseEndTime - phaseStartTime;
                 uint256 timeInPhase = currentTime - phaseStartTime;
-                
+
                 uint256 progress = (timeInPhase * 1e18) / phaseDuration;
                 uint256 vestedInPhase = (allocation * phase.percentage * progress) / (100 * 1e18);
-                
+
                 totalVested += vestedInPhase;
             }
         }
 
         totalReleased = schedule.releasedAmount;
         releasable = totalVested - totalReleased;
-        
+
         return (totalVested, totalReleased, releasable);
     }
 
@@ -451,14 +451,14 @@ contract FibonVesting is Ownable {
     function getVestedPercentage(address _beneficiary) public view returns (uint256 percentage) {
         (uint256 totalVested, , ) = getVestedAmount(_beneficiary);
         if (totalAllocation[_beneficiary] == 0) return 0;
-        
+
         // Return percentage in basis points (100% = 10000)
         return (totalVested * 10000) / totalAllocation[_beneficiary];
     }
 
     function _validatePhases(VestingPhase[] memory phases) internal pure {
         require(phases.length > 0, "Empty phases array");
-        
+
         for (uint256 i = 1; i < phases.length; i++) {
             require(
                 phases[i].start >= phases[i-1].end,
@@ -468,23 +468,73 @@ contract FibonVesting is Ownable {
     }
 
     /**
-     * @notice Allows the owner to toggle a vesting schedule's status.
+     * @notice Allows the owner to disable a vesting schedule and create a new one with remaining time.
      * @dev Only the owner can call this function.
-     * @param _beneficiary The address of the beneficiary whose schedule is to be toggled.
-     * @param _disabled The new status of the schedule.
+     * @param _beneficiary The address of the beneficiary whose schedule is to be disabled.
      */
-    function toggleVestingSchedule(address _beneficiary, bool _disabled) external onlyOwner {
+    function disableVestingSchedule(address _beneficiary, bool _disabled) external onlyOwner {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         require(schedule.startTime != 0, "No vesting schedule for beneficiary");
-        require(schedule.isDisabled != _disabled, "Schedule already in desired state");
-        
-        schedule.isDisabled = _disabled;
-        
-        if (_disabled) {
-            emit VestingScheduleDisabled(_beneficiary);
-        } else {
-            emit VestingScheduleEnabled(_beneficiary);
+        require(!schedule.isDisabled, "Schedule already disabled");
+        require(_disabled, "Can only disable schedules");
+
+        (uint256 totalVested, uint256 totalReleased, ) = getVestedAmount(_beneficiary);
+
+        uint256 remainingTokens = totalAllocation[_beneficiary] - totalVested;
+        uint256 totalAmount = totalAllocation[_beneficiary];
+
+        uint256 originalEndTime = schedule.startTime + schedule.phases[schedule.phases.length - 1].end;
+        uint256 currentTime = block.timestamp;
+        uint256 remainingTime = originalEndTime > currentTime ? originalEndTime - currentTime : 0;
+
+        if (remainingTime > 0 && remainingTokens > 0) {
+            uint256 basePhaseLength = remainingTime / 3;
+            uint256 timeRemainder = remainingTime % 3;
+
+            uint256 phase1Length = basePhaseLength;
+            uint256 phase2Length = basePhaseLength + (timeRemainder > 0 ? 1 : 0);
+            uint256 phase3Length = basePhaseLength + (timeRemainder > 1 ? 1 : 0);
+
+            delete vestingSchedules[_beneficiary].phases;
+
+            uint256 earnedPercentage = (totalVested * 100) / totalAmount;
+            uint256 remainingPercentage = 100 - earnedPercentage;
+
+            uint256 baseEarnedPerPhase = earnedPercentage / 3;
+            uint256 earnedRemainder = earnedPercentage % 3;
+
+            uint256 phase1EarnedPercentage = baseEarnedPerPhase;
+            uint256 phase2EarnedPercentage = baseEarnedPerPhase + (earnedRemainder > 0 ? 1 : 0);
+            uint256 phase3EarnedPercentage = baseEarnedPerPhase + (earnedRemainder > 1 ? 1 : 0);
+
+            uint256 phase1Percentage = phase1EarnedPercentage + (remainingPercentage * 20) / 100;
+            uint256 phase2Percentage = phase2EarnedPercentage + (remainingPercentage * 35) / 100;
+            uint256 phase3Percentage = phase3EarnedPercentage + (remainingPercentage * 45) / 100;
+
+            vestingSchedules[_beneficiary].phases.push(VestingPhase({
+                start: 0,
+                end: phase1Length,
+                percentage: phase1Percentage
+            }));
+
+            vestingSchedules[_beneficiary].phases.push(VestingPhase({
+                start: phase1Length,
+                end: phase1Length + phase2Length,
+                percentage: phase2Percentage
+            }));
+
+            vestingSchedules[_beneficiary].phases.push(VestingPhase({
+                start: phase1Length + phase2Length,
+                end: phase1Length + phase2Length + phase3Length,
+                percentage: phase3Percentage
+            }));
+
+            vestingSchedules[_beneficiary].startTime = currentTime;
+            vestingSchedules[_beneficiary].releasedAmount = totalReleased;
         }
+
+        schedule.isDisabled = true;
+        emit VestingScheduleDisabled(_beneficiary);
     }
 
 }
