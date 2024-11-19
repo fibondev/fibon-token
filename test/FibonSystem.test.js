@@ -4,13 +4,13 @@ const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
 describe("Fibon Token System", function () {
     let token, ico, vesting, multisig;
-    let owner, addr1, addr2, addr3, addr4, addr5;
+    let owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7;
     let tokenAddress, icoAddress, vestingAddress;
     let startTime, endTime;
 
     beforeEach(async function () {
         try {
-            [owner, addr1, addr2, addr3, addr4, addr5] = await ethers.getSigners();
+            [owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7] = await ethers.getSigners();
             console.log("Got signers");
 
             const FibonMultiSig = await ethers.getContractFactory("FibonMultiSig");
@@ -474,19 +474,62 @@ describe("Fibon Token System", function () {
         });
 
         it("Should handle concurrent vesting schedules", async function () {
-            const scheduleData = vesting.interface.encodeFunctionData(
-                "createVestingSchedule",
-                [addr5.address, 1, ethers.parseEther("10000")]
-            );
-            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
+            const testAddr1 = addr6;
+            const testAddr2 = addr7;
+
+            const mintAmount = ethers.parseEther("20000");
+            const mintData = token.interface.encodeFunctionData("mint", [vestingAddress, mintAmount]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
-            await time.increase(180 * 24 * 3600);
+            const latestTime = await time.latest();
+            await time.setNextBlockTimestamp(latestTime + 1);
 
-            const [vested1, , ] = await vesting.getVestedAmount(addr4.address);
-            const [vested2, , ] = await vesting.getVestedAmount(addr5.address);
+            const startTime = latestTime + 1;
+            const halfTime = startTime + (180 * 24 * 3600);
+            const endTime = startTime + (360 * 24 * 3600);
 
-            expect(vested1).to.equal(vested2);
+            const phases = [
+                {
+                    start: 0,
+                    end: halfTime - startTime,
+                    percentage: 50
+                },
+                {
+                    start: halfTime - startTime,
+                    end: endTime - startTime,
+                    percentage: 50
+                }
+            ];
+
+            const addTypeData = vesting.interface.encodeFunctionData("addVestingType", [2, phases]);
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, addTypeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const amount = ethers.parseEther("10000");
+
+            const schedule1Data = vesting.interface.encodeFunctionData(
+                "createVestingSchedule",
+                [testAddr1.address, 2, amount]
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, schedule1Data);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const schedule2Data = vesting.interface.encodeFunctionData(
+                "createVestingSchedule",
+                [testAddr2.address, 2, amount]
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, schedule2Data);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            await time.increaseTo(halfTime);
+
+            const [vested1, ,] = await vesting.getVestedAmount(testAddr1.address);
+            const [vested2, ,] = await vesting.getVestedAmount(testAddr2.address);
+
+            const expectedVested = ethers.parseEther("5000");
+            expect(vested1).to.be.closeTo(expectedVested, ethers.parseEther("1000"));
+            expect(vested2).to.be.closeTo(expectedVested, ethers.parseEther("1000"));
         });
 
         it("Should properly handle zero vesting periods", async function () {
