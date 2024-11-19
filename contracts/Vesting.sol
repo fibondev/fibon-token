@@ -505,11 +505,10 @@ contract FibonVesting is Ownable {
 
             uint256 phase1EarnedPercentage = baseEarnedPerPhase;
             uint256 phase2EarnedPercentage = baseEarnedPerPhase + (earnedRemainder > 0 ? 1 : 0);
-            uint256 phase3EarnedPercentage = baseEarnedPerPhase + (earnedRemainder > 1 ? 1 : 0);
 
             uint256 phase1Percentage = phase1EarnedPercentage + (remainingPercentage * 20) / 100;
             uint256 phase2Percentage = phase2EarnedPercentage + (remainingPercentage * 35) / 100;
-            uint256 phase3Percentage = phase3EarnedPercentage + (remainingPercentage * 45) / 100;
+            uint256 phase3Percentage = 100 - phase1Percentage - phase2Percentage;
 
             vestingSchedules[_beneficiary].phases.push(VestingPhase({
                 start: 0,
@@ -535,6 +534,10 @@ contract FibonVesting is Ownable {
 
         schedule.isDisabled = true;
         emit VestingScheduleDisabled(_beneficiary);
+    }
+
+    function getSchedulePhases(address beneficiary) public view returns (VestingPhase[] memory) {
+        return vestingSchedules[beneficiary].phases;
     }
 
 }
