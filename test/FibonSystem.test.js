@@ -120,11 +120,14 @@ describe("Fibon Token System", function () {
 
         it("Should burn tokens through MultiSig", async function () {
             const mintAmount = ethers.parseEther("1000000");
+            const burnAmount = ethers.parseEther("500000");
+
             const mintData = token.interface.encodeFunctionData("mint", [addr4.address, mintAmount]);
             await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
             await multisig.connect(addr2).confirmTransaction(0);
 
-            const burnAmount = ethers.parseEther("500000");
+            await token.connect(addr4).approve(await multisig.getAddress(), burnAmount);
+
             const burnData = token.interface.encodeFunctionData("burnFrom", [addr4.address, burnAmount]);
             await multisig.connect(addr1).submitTransaction(tokenAddress, 0, burnData);
             await multisig.connect(addr2).confirmTransaction(1);
@@ -248,7 +251,7 @@ describe("Fibon Token System", function () {
             await multisig.connect(addr1).submitTransaction(tokenAddress, 0, approveData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
-            await ico.connect(addr4).buyTokens({ value: ethers.parseEther("1").toString() });
+            await ico.connect(addr4).buyTokens({ value: ethers.parseEther("1") });
 
             const balance = await token.balanceOf(addr4.address);
             expect(balance).to.be.gt(0);
@@ -259,11 +262,44 @@ describe("Fibon Token System", function () {
         let nextTxId = 0;
 
         beforeEach(async function () {
+            [owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7] = await ethers.getSigners();
+            const FibonMultiSig = await ethers.getContractFactory("FibonMultiSig");
+            const owners = [addr1.address, addr2.address, addr3.address];
+            multisig = await FibonMultiSig.deploy(owners, 2);
+            await multisig.waitForDeployment();
+
+            const FibonToken = await ethers.getContractFactory("FibonToken");
+            token = await FibonToken.deploy(await multisig.getAddress());
+            await token.waitForDeployment();
+            tokenAddress = await token.getAddress();
+
+            const FibonVesting = await ethers.getContractFactory("FibonVesting");
+            vesting = await FibonVesting.deploy(tokenAddress, await multisig.getAddress());
+            await vesting.waitForDeployment();
+            vestingAddress = await vesting.getAddress();
+
             nextTxId = 0;
 
             const mintAmount = ethers.parseEther("1000000");
             const mintData = token.interface.encodeFunctionData("mint", [vestingAddress, mintAmount]);
             await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const phases = [
+                {
+                    start: 0,
+                    end: 30 * 24 * 3600,
+                    percentage: 30
+                },
+                {
+                    start: 30 * 24 * 3600,
+                    end: 60 * 24 * 3600,
+                    percentage: 70
+                }
+            ];
+
+            const addTypeData = vesting.interface.encodeFunctionData("addVestingType", [1, phases]);
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, addTypeData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
             const scheduleData = vesting.interface.encodeFunctionData(
@@ -289,6 +325,8 @@ describe("Fibon Token System", function () {
 
             const [initialVested, , ] = await vesting.getVestedAmount(addr4.address);
 
+            const earnedPercentage = (initialVested * 100n) / ethers.parseEther("10000");
+
             const disableData = vesting.interface.encodeFunctionData(
                 "disableVestingSchedule",
                 [addr4.address, true]
@@ -299,11 +337,10 @@ describe("Fibon Token System", function () {
             const schedule = await vesting.vestingSchedules(addr4.address);
             expect(schedule.isDisabled).to.be.true;
 
-            const earnedPercentage = initialVested.mul(100).div(ethers.parseEther("10000"));
-            const firstPhase = await vesting.vestingSchedules(addr4.address).phases[0];
+            const firstPhase = await vesting.vestingTypes(1, 0);
             expect(firstPhase.percentage).to.be.closeTo(
-                earnedPercentage.div(3).add(20),
-                1
+                Number(earnedPercentage / 3n + 20n),
+                3
             );
         });
 
@@ -318,9 +355,10 @@ describe("Fibon Token System", function () {
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
             const schedule = await vesting.vestingSchedules(addr4.address);
-            const phases = schedule.phases;
 
-            const phaseLengths = phases.map(p => p.end - p.start);
+            const phases = await vesting.getSchedulePhases(addr4.address);
+
+            const phaseLengths = phases.map(p => Number(p.end - p.start));
             const maxDiff = Math.max(...phaseLengths) - Math.min(...phaseLengths);
             expect(maxDiff).to.be.lte(2);
         });
@@ -399,8 +437,26 @@ describe("Fibon Token System", function () {
 
         it("Should prevent release when no tokens are available", async function () {
             await expect(
-                vesting.connect(addr4).release()
-            ).to.be.revertedWith("No tokens available for release");
+                vesting.connect(addr5).release()
+            ).to.be.revertedWith("No vesting schedule for caller");
+
+            const scheduleData = vesting.interface.encodeFunctionData(
+                "createVestingSchedule",
+                [addr5.address, 1, ethers.parseEther("1000")]
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const disableData = vesting.interface.encodeFunctionData(
+                "disableVestingSchedule",
+                [addr5.address, true]
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, disableData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            await expect(
+                vesting.connect(addr5).release()
+            ).to.be.revertedWith("Vesting schedule is disabled");
         });
 
         it("Should handle edge cases in vesting schedule", async function () {
