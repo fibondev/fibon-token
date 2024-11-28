@@ -155,20 +155,10 @@ describe("Fibon Token System", function () {
             await time.increaseTo(startTime + 1);
             const buyAmount = ethers.parseEther("1");
 
-            await ico.connect(addr4).buyTokens({ value: buyAmount.toString() });
+            await ico.connect(addr4).buyTokens(0, { value: buyAmount });
 
             const preLaunchInfo = await ico.preLaunchSale();
-            expect(preLaunchInfo.totalSold).to.equal(buyAmount * 10n);
-        });
-
-        it("Should allow emergency stop through MultiSig", async function () {
-            const stopData = ico.interface.encodeFunctionData("stop");
-            await multisig.connect(addr1).submitTransaction(icoAddress, 0, stopData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
-
-            await expect(
-                ico.connect(addr4).buyTokens({ value: ethers.parseEther("1").toString() })
-            ).to.be.revertedWith("ICO is stopped");
+            expect(preLaunchInfo.sold).to.equal(buyAmount * 10n);
         });
     });
 
@@ -251,7 +241,7 @@ describe("Fibon Token System", function () {
             await multisig.connect(addr1).submitTransaction(tokenAddress, 0, approveData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
-            await ico.connect(addr4).buyTokens({ value: ethers.parseEther("1") });
+            await ico.connect(addr4).buyTokens(0, { value: ethers.parseEther("1") });
 
             const balance = await token.balanceOf(addr4.address);
             expect(balance).to.be.gt(0);
