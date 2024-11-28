@@ -163,15 +163,14 @@ describe("Fibon Token System", function () {
     });
 
     describe("Vesting Tests with MultiSig", function () {
-        let nextTxId = 0;
+        let nextTxId;
 
         beforeEach(async function () {
             nextTxId = 0;
 
             const mintAmount = ethers.parseEther("1000000");
             const mintData = token.interface.encodeFunctionData("mint", [vestingAddress, mintAmount]);
-            const tx = await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
-            await tx.wait();
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
         });
 
@@ -180,21 +179,32 @@ describe("Fibon Token System", function () {
                 {
                     start: 0,
                     end: 30 * 24 * 3600,
-                    percentage: 30
+                    percentage: 20
                 },
                 {
                     start: 30 * 24 * 3600,
                     end: 60 * 24 * 3600,
-                    percentage: 70
+                    percentage: 35
+                },
+                {
+                    start: 60 * 24 * 3600,
+                    end: 90 * 24 * 3600,
+                    percentage: 45
                 }
             ];
 
-            const addTypeData = vesting.interface.encodeFunctionData("addVestingType", [1, phases]);
+            const addTypeData = vesting.interface.encodeFunctionData("addVestingType", [9, phases]);
             await multisig.connect(addr1).submitTransaction(vestingAddress, 0, addTypeData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
-            const firstPhase = await vesting.vestingTypes(1, 0);
-            expect(firstPhase.percentage).to.equal(30);
+            const firstPhase = await vesting.vestingTypes(9, 0);
+            const secondPhase = await vesting.vestingTypes(9, 1);
+            const thirdPhase = await vesting.vestingTypes(9, 2);
+
+
+            expect(firstPhase.percentage).to.equal(20);
+            expect(secondPhase.percentage).to.equal(35);
+            expect(thirdPhase.percentage).to.equal(45);
         });
 
         it("Should create vesting schedule through MultiSig", async function () {
@@ -217,7 +227,10 @@ describe("Fibon Token System", function () {
             await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
-            const disableData = vesting.interface.encodeFunctionData("disableVestingSchedule", [addr4.address]);
+            const disableData = vesting.interface.encodeFunctionData(
+                "disableVestingSchedule",
+                [addr4.address, true]
+            );
             await multisig.connect(addr1).submitTransaction(vestingAddress, 0, disableData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
@@ -227,24 +240,42 @@ describe("Fibon Token System", function () {
     });
 
     describe("System Integration Tests", function () {
+        let nextTxId;
+
+        beforeEach(async function () {
+            nextTxId = 0;
+            const mintAmount = ethers.parseEther("1000000");
+
+            const mintIcoData = token.interface.encodeFunctionData("mint", [icoAddress, mintAmount]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintIcoData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const mintVestingData = token.interface.encodeFunctionData("mint", [vestingAddress, mintAmount]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintVestingData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+        });
+
         it("Should handle complete ICO and Vesting flow", async function () {
-            let nextTxId = 0;
-
             const latestTime = await time.latest();
-            await time.increaseTo(latestTime + 3600);
+            if (latestTime < startTime) {
+                await time.increaseTo(startTime + 1);
+            }
 
-            const icoMintData = token.interface.encodeFunctionData("mint", [icoAddress, ethers.parseEther("1000000")]);
-            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, icoMintData);
+            const buyAmount = ethers.parseEther("1");
+            await ico.connect(addr4).buyTokens(0, { value: buyAmount });
+
+            const scheduleData = vesting.interface.encodeFunctionData(
+                "createVestingSchedule",
+                [addr4.address, 1, ethers.parseEther("10000")]
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
-            const approveData = token.interface.encodeFunctionData("approve", [icoAddress, ethers.parseEther("1000000")]);
-            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, approveData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+            await time.increase(30 * 24 * 3600);
 
-            await ico.connect(addr4).buyTokens(0, { value: ethers.parseEther("1") });
-
-            const balance = await token.balanceOf(addr4.address);
-            expect(balance).to.be.gt(0);
+            const [vestedAmount, , releasable] = await vesting.getVestedAmount(addr4.address);
+            expect(vestedAmount).to.be.above(0);
+            expect(releasable).to.be.above(0);
         });
     });
 
@@ -600,6 +631,142 @@ describe("Fibon Token System", function () {
 
             const [vested, , ] = await vesting.getVestedAmount(addr5.address);
             expect(vested).to.equal(ethers.parseEther("1000"));
+        });
+    });
+
+    describe("Token Blacklist Tests", function () {
+        let nextTxId;
+
+        beforeEach(async function () {
+            nextTxId = 0;
+            const mintData = token.interface.encodeFunctionData(
+                "mint",
+                [addr4.address, ethers.parseEther("1000")]
+            );
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+        });
+
+        it("Should handle blacklisting through MultiSig", async function () {
+            const blacklistData = token.interface.encodeFunctionData(
+                "blacklistAddress",
+                [addr4.address]
+            );
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, blacklistData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            expect(await token.isBlacklisted(addr4.address)).to.be.true;
+
+            await expect(
+                token.connect(addr4).transfer(addr5.address, ethers.parseEther("100"))
+            ).to.be.revertedWith("Sender is blacklisted");
+
+            await expect(
+                token.connect(addr5).transfer(addr4.address, ethers.parseEther("100"))
+            ).to.be.revertedWith("Recipient is blacklisted");
+
+            const unblacklistData = token.interface.encodeFunctionData(
+                "unblacklistAddress",
+                [addr4.address]
+            );
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, unblacklistData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            expect(await token.isBlacklisted(addr4.address)).to.be.false;
+
+            await token.connect(addr4).transfer(addr5.address, ethers.parseEther("100"));
+            expect(await token.balanceOf(addr5.address)).to.equal(ethers.parseEther("100"));
+        });
+
+        it("Should prevent burning by blacklisted addresses", async function () {
+            const blacklistData = token.interface.encodeFunctionData(
+                "blacklistAddress",
+                [addr4.address]
+            );
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, blacklistData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            await expect(
+                token.connect(addr4).burn(ethers.parseEther("100"))
+            ).to.be.revertedWith("Sender is blacklisted");
+        });
+
+        it("Should prevent burnFrom operations involving blacklisted addresses", async function () {
+            await token.connect(addr4).approve(addr5.address, ethers.parseEther("500"));
+
+            const blacklistSpenderData = token.interface.encodeFunctionData(
+                "blacklistAddress",
+                [addr5.address]
+            );
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, blacklistSpenderData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            await expect(
+                token.connect(addr5).burnFrom(addr4.address, ethers.parseEther("100"))
+            ).to.be.revertedWith("Spender is blacklisted");
+
+            const unblacklistSpenderData = token.interface.encodeFunctionData(
+                "unblacklistAddress",
+                [addr5.address]
+            );
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, unblacklistSpenderData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const blacklistOwnerData = token.interface.encodeFunctionData(
+                "blacklistAddress",
+                [addr4.address]
+            );
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, blacklistOwnerData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            await expect(
+                token.connect(addr5).burnFrom(addr4.address, ethers.parseEther("100"))
+            ).to.be.revertedWith("Token owner is blacklisted");
+        });
+
+        it("Should prevent permit operations involving blacklisted addresses", async function () {
+            const deadline = Math.floor(Date.now() / 1000) + 3600;
+            const value = ethers.parseEther("100");
+
+            const domain = {
+                name: "FibonToken",
+                version: "1",
+                chainId: (await ethers.provider.getNetwork()).chainId,
+                verifyingContract: tokenAddress
+            };
+
+            const types = {
+                Permit: [
+                    { name: "owner", type: "address" },
+                    { name: "spender", type: "address" },
+                    { name: "value", type: "uint256" },
+                    { name: "nonce", type: "uint256" },
+                    { name: "deadline", type: "uint256" }
+                ]
+            };
+
+            const blacklistData = token.interface.encodeFunctionData(
+                "blacklistAddress",
+                [addr4.address]
+            );
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, blacklistData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const nonce = await token.nonces(addr4.address);
+            const message = {
+                owner: addr4.address,
+                spender: addr5.address,
+                value: value,
+                nonce: nonce,
+                deadline: deadline
+            };
+
+            const signature = await addr4.signTypedData(domain, types, message);
+            const { v, r, s } = ethers.Signature.from(signature);
+
+            await expect(
+                token.permit(addr4.address, addr5.address, value, deadline, v, r, s)
+            ).to.be.revertedWith("Owner is blacklisted");
         });
     });
 });
