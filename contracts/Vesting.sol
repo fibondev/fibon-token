@@ -281,12 +281,10 @@ contract FibonVesting is Ownable {
 
         require(token.balanceOf(address(this)) >= _amount, "Insufficient contract balance");
 
-        // Create the schedule first
         vestingSchedules[_beneficiary].startTime = block.timestamp;
         vestingSchedules[_beneficiary].releasedAmount = 0;
         vestingSchedules[_beneficiary].isDisabled = false;
 
-        // Push phases one by one
         for (uint256 i = 0; i < vtPhases.length; i++) {
             vestingSchedules[_beneficiary].phases.push(vtPhases[i]);
         }
@@ -339,14 +337,12 @@ contract FibonVesting is Ownable {
             if (currentTime < phaseStartTime) {
                 continue;
             } else if (currentTime >= phaseEndTime) {
-                // Phase fully completed
                 totalVested += (allocation * phase.percentage) / 100;
             } else {
                 uint256 phaseDuration = phaseEndTime - phaseStartTime;
                 require(phaseDuration > 0, "Invalid phase duration");
                 uint256 timeInPhase = currentTime - phaseStartTime;
 
-                // Changed to linear vesting
                 uint256 progress = (timeInPhase * 1e18) / phaseDuration;
                 uint256 vestedInPhase = (allocation * phase.percentage * progress) / (100 * 1e18);
 
@@ -424,7 +420,6 @@ contract FibonVesting is Ownable {
             if (currentTime < phaseStartTime) {
                 continue;
             } else if (currentTime >= phaseEndTime) {
-                // Phase fully completed
                 totalVested += (allocation * phase.percentage) / 100;
             } else {
                 uint256 phaseDuration = phaseEndTime - phaseStartTime;
@@ -452,7 +447,6 @@ contract FibonVesting is Ownable {
         (uint256 totalVested, , ) = getVestedAmount(_beneficiary);
         if (totalAllocation[_beneficiary] == 0) return 0;
 
-        // Return percentage in basis points (100% = 10000)
         return (totalVested * 10000) / totalAllocation[_beneficiary];
     }
 
