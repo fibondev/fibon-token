@@ -9,12 +9,18 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 /**
  * @title FibonToken
  * @dev Implementation of the FibonToken, an ERC20 token with burnable and mintable functionalities.
- * It also supports ERC20Permit for gasless approvals.
+ * It also supports ERC20Permit for gasless approvals and includes transfer fees.
  */
 contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
 
     /// @notice Mapping of blacklisted addresses
     mapping(address => bool) public isBlacklisted;
+
+    /// @notice Fixed fee amount for transfers
+    uint256 public transferFee;
+
+    /// @notice Address where fees are collected
+    address public immutable feeCollector;
 
     /// @notice Event emitted when an address is blacklisted
     event AddressBlacklisted(address indexed account);
@@ -22,16 +28,23 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
     /// @notice Event emitted when an address is removed from blacklist
     event AddressUnblacklisted(address indexed account);
 
+    /// @notice Event emitted when transfer fee is updated
+    event TransferFeeUpdated(uint256 oldFee, uint256 newFee);
+
     /**
      * @dev Sets the token name, symbol, and initializes the permit functionality.
-     * Also sets the initial owner of the contract.
+     * Also sets the initial owner and fee collector of the contract.
      * @param initialOwner The address of the initial owner of the token.
+     * @param _feeCollector The address that will receive transfer fees.
      */
-    constructor(address initialOwner)
+    constructor(address initialOwner, address _feeCollector)
         ERC20("FibonToken", "FIBON")
         ERC20Permit("FibonToken")
         Ownable(initialOwner)
-    {}
+    {
+        require(_feeCollector != address(0), "Invalid fee collector");
+        feeCollector = _feeCollector;
+    }
 
     /**
      * @notice Allows the owner to mint new tokens.
@@ -42,6 +55,16 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
     function mint(address to, uint256 amount) public onlyOwner {
         require(!isBlacklisted[to], "Recipient is blacklisted");
         _mint(to, amount);
+    }
+
+    /**
+     * @notice Sets the fixed transfer fee
+     * @param newFee The new fee amount in token units
+     */
+    function setTransferFee(uint256 newFee) external onlyOwner {
+        uint256 oldFee = transferFee;
+        transferFee = newFee;
+        emit TransferFeeUpdated(oldFee, newFee);
     }
 
     /**
@@ -69,17 +92,48 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
     }
 
     /**
-     * @dev Override transfer and transferFrom to add blacklist check
+     * @dev Override transfer and transferFrom to add blacklist check and fee collection
      */
     function transfer(address to, uint256 amount) public virtual override returns (bool) {
         require(!isBlacklisted[msg.sender], "Sender is blacklisted");
         require(!isBlacklisted[to], "Recipient is blacklisted");
+
+        if (transferFee > 0 && msg.sender != feeCollector) {
+            require(amount >= transferFee, "Amount less than fee");
+            require(balanceOf(msg.sender) >= amount + transferFee, "Insufficient balance for transfer with fee");
+
+            _transfer(msg.sender, feeCollector, transferFee);
+
+            _transfer(msg.sender, to, amount);
+            return true;
+        }
+
         return super.transfer(to, amount);
     }
 
+    /**
+     * @dev Override transferFrom to add fee collection
+     */
     function transferFrom(address from, address to, uint256 amount) public virtual override returns (bool) {
         require(!isBlacklisted[from], "Sender is blacklisted");
         require(!isBlacklisted[to], "Recipient is blacklisted");
+
+        if (transferFee > 0 && from != feeCollector) {
+            require(amount >= transferFee, "Amount less than fee");
+            uint256 totalAmount = amount + transferFee;
+            require(balanceOf(from) >= totalAmount, "Insufficient balance for transfer with fee");
+
+            uint256 currentAllowance = allowance(from, msg.sender);
+            require(currentAllowance >= totalAmount, "Insufficient allowance for transfer with fee");
+
+            _spendAllowance(from, msg.sender, totalAmount);
+
+            _transfer(from, feeCollector, transferFee);
+
+            _transfer(from, to, amount);
+            return true;
+        }
+
         return super.transferFrom(from, to, amount);
     }
 

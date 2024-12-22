@@ -4,13 +4,13 @@ const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
 describe("Fibon Token System", function () {
     let token, ico, vesting, multisig;
-    let owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7;
+    let owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7, addr8;
     let tokenAddress, icoAddress, vestingAddress;
     let startTime, endTime;
 
     beforeEach(async function () {
         try {
-            [owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7] = await ethers.getSigners();
+            [owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7, addr8] = await ethers.getSigners();
             console.log("Got signers");
 
             const FibonMultiSig = await ethers.getContractFactory("FibonMultiSig");
@@ -29,7 +29,7 @@ describe("Fibon Token System", function () {
             console.log("MultiSig deployment confirmed");
 
             const FibonToken = await ethers.getContractFactory("FibonToken");
-            token = await FibonToken.deploy(await multisig.getAddress());
+            token = await FibonToken.deploy(await multisig.getAddress(), await multisig.getAddress());
             await token.waitForDeployment();
             tokenAddress = await token.getAddress();
             console.log("Token deployed at:", tokenAddress);
@@ -283,14 +283,14 @@ describe("Fibon Token System", function () {
         let nextTxId = 0;
 
         beforeEach(async function () {
-            [owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7] = await ethers.getSigners();
+            [owner, addr1, addr2, addr3, addr4, addr5, addr6, addr7, addr8] = await ethers.getSigners();
             const FibonMultiSig = await ethers.getContractFactory("FibonMultiSig");
             const owners = [addr1.address, addr2.address, addr3.address];
             multisig = await FibonMultiSig.deploy(owners, 2);
             await multisig.waitForDeployment();
 
             const FibonToken = await ethers.getContractFactory("FibonToken");
-            token = await FibonToken.deploy(await multisig.getAddress());
+            token = await FibonToken.deploy(await multisig.getAddress(), await multisig.getAddress());
             await token.waitForDeployment();
             tokenAddress = await token.getAddress();
 
@@ -767,6 +767,106 @@ describe("Fibon Token System", function () {
             await expect(
                 token.permit(addr4.address, addr5.address, value, deadline, v, r, s)
             ).to.be.revertedWith("Owner is blacklisted");
+        });
+    });
+
+    describe("Token Fee Tests", function () {
+        let nextTxId;
+
+        beforeEach(async function () {
+            nextTxId = 0;
+            const mintAmount = ethers.parseEther("1000000");
+            const mintData = token.interface.encodeFunctionData("mint", [addr4.address, mintAmount]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+        });
+
+        it("Should set transfer fee through MultiSig", async function () {
+            const newFee = ethers.parseEther("10");
+            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [newFee]);
+
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            expect(await token.transferFee()).to.equal(newFee);
+        });
+
+        it("Should collect fees on transfers", async function () {
+            const fee = ethers.parseEther("10");
+            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [fee]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const transferAmount = ethers.parseEther("100");
+            await token.connect(addr4).transfer(addr5.address, transferAmount);
+
+            const multisigBalance = await token.balanceOf(await multisig.getAddress());
+            const recipientBalance = await token.balanceOf(addr5.address);
+
+            expect(multisigBalance).to.equal(fee);
+            expect(recipientBalance).to.equal(transferAmount);
+        });
+
+        it("Should collect fees on transferFrom", async function () {
+            const fee = ethers.parseEther("10");
+            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [fee]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const transferAmount = ethers.parseEther("100");
+            const totalAmount = transferAmount + fee;
+
+            await token.connect(addr4).approve(addr5.address, totalAmount);
+            await token.connect(addr5).transferFrom(addr4.address, addr6.address, transferAmount);
+
+            const multisigBalance = await token.balanceOf(await multisig.getAddress());
+            const recipientBalance = await token.balanceOf(addr6.address);
+
+            expect(multisigBalance).to.equal(fee);
+            expect(recipientBalance).to.equal(transferAmount);
+        });
+
+        it("Should not charge fee when sender is fee collector", async function () {
+            const fee = ethers.parseEther("10");
+            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [fee]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const transferAmount = ethers.parseEther("100");
+            await token.connect(addr4).transfer(await multisig.getAddress(), transferAmount);
+
+            const transferData = token.interface.encodeFunctionData("transfer", [addr5.address, transferAmount]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, transferData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const recipientBalance = await token.balanceOf(addr5.address);
+            expect(recipientBalance).to.equal(transferAmount);
+        });
+
+        it("Should fail if balance insufficient for transfer + fee", async function () {
+            const fee = ethers.parseEther("10");
+            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [fee]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const balance = await token.balanceOf(addr4.address);
+            await expect(
+                token.connect(addr4).transfer(addr5.address, balance)
+            ).to.be.revertedWith("Insufficient balance for transfer with fee");
+        });
+
+        it("Should fail if allowance insufficient for transfer + fee", async function () {
+            const fee = ethers.parseEther("10");
+            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [fee]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const transferAmount = ethers.parseEther("100");
+            await token.connect(addr4).approve(addr5.address, transferAmount);
+
+            await expect(
+                token.connect(addr5).transferFrom(addr4.address, addr6.address, transferAmount)
+            ).to.be.revertedWith("Insufficient allowance for transfer with fee");
         });
     });
 });
