@@ -632,6 +632,83 @@ describe("Fibon Token System", function () {
             const [vested, , ] = await vesting.getVestedAmount(addr5.address);
             expect(vested).to.equal(ethers.parseEther("1000"));
         });
+
+
+        it("Should prevent unauthorized address operations", async function () {
+            const phases = [
+                {
+                    start: 0n,
+                    end: 30n * 24n * 3600n,
+                    percentage: 100n
+                }
+            ];
+
+            await expect(
+                vesting.connect(addr4).addVestingType(100n, phases)
+            ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount");
+
+            await expect(
+                vesting.connect(addr4).createVestingSchedule(addr5.address, 1n, ethers.parseEther("1000"))
+            ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount");
+
+            await expect(
+                vesting.connect(addr4).disableVestingSchedule(addr5.address, true)
+            ).to.be.revertedWithCustomError(vesting, "OwnableUnauthorizedAccount");
+        });
+
+
+        it("Should handle multiple address operations in batch", async function () {
+            const batchAddresses = [addr4, addr5, addr6, addr7];
+            const amount = ethers.parseEther("10000");
+        
+            for(const addr of batchAddresses) {
+                const scheduleData = vesting.interface.encodeFunctionData(
+                    "createVestingSchedule",
+                    [addr.address, 1, amount]
+                );
+                await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
+                await multisig.connect(addr2).confirmTransaction(await multisig.transactionCount() - 1n);
+            }
+        
+            for(const addr of batchAddresses) {
+                const schedule = await vesting.vestingSchedules(addr.address);
+                expect(schedule.startTime > 0n).to.be.true;
+                expect(await vesting.totalAllocation(addr.address)).to.equal(amount);
+            }
+        });
+
+        describe("Token Burn Authorization Tests", function () {
+            beforeEach(async function () {
+                const mintData = token.interface.encodeFunctionData(
+                    "mint",
+                    [addr4.address, ethers.parseEther("1000")]
+                );
+                await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
+                await multisig.connect(addr2).confirmTransaction(await multisig.transactionCount() - 1n);
+            });
+
+            it("Should prevent unauthorized burning of others' tokens", async function () {
+                await expect(
+                    token.connect(addr5).burn(ethers.parseEther("100"))
+                ).to.be.revertedWithCustomError(token, "ERC20InsufficientBalance");
+
+                await expect(
+                    token.connect(addr5).burnFrom(addr4.address, ethers.parseEther("100"))
+                ).to.be.revertedWithCustomError(token, "ERC20InsufficientAllowance");
+
+                await token.connect(addr4).approve(addr5.address, ethers.parseEther("100"));
+                const blacklistData = token.interface.encodeFunctionData(
+                    "blacklistAddress",
+                    [addr5.address]
+                );
+                await multisig.connect(addr1).submitTransaction(tokenAddress, 0, blacklistData);
+                await multisig.connect(addr2).confirmTransaction(await multisig.transactionCount() - 1n);
+
+                await expect(
+                    token.connect(addr5).burnFrom(addr4.address, ethers.parseEther("100"))
+                ).to.be.revertedWith("Spender is blacklisted");
+            });
+        });
     });
 
     describe("Token Blacklist Tests", function () {
