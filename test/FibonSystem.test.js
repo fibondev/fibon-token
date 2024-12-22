@@ -868,5 +868,39 @@ describe("Fibon Token System", function () {
                 token.connect(addr5).transferFrom(addr4.address, addr6.address, transferAmount)
             ).to.be.revertedWith("Insufficient allowance for transfer with fee");
         });
+
+        it("Should allow setting transfer fee to zero", async function () {
+            const initialFee = ethers.parseEther("10");
+            let setFeeData = token.interface.encodeFunctionData("setTransferFee", [initialFee]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            setFeeData = token.interface.encodeFunctionData("setTransferFee", [0]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            expect(await token.transferFee()).to.equal(0);
+
+            const transferAmount = ethers.parseEther("100");
+            const initialBalance = await token.balanceOf(addr4.address);
+            await token.connect(addr4).transfer(addr5.address, transferAmount);
+
+            expect(await token.balanceOf(addr4.address)).to.equal(initialBalance - transferAmount);
+            expect(await token.balanceOf(addr5.address)).to.equal(transferAmount);
+            expect(await token.balanceOf(await multisig.getAddress())).to.equal(0);
+        });
+
+        it("Should not allow invalid transfer fees", async function () {
+            const highFee = ethers.parseEther("1000001");
+            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [highFee]);
+            
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const transferAmount = ethers.parseEther("100");
+            await expect(
+                token.connect(addr4).transfer(addr5.address, transferAmount)
+            ).to.be.revertedWith("Amount less than fee");
+        });
     });
 });
