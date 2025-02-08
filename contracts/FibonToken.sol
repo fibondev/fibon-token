@@ -99,12 +99,13 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
         require(!isBlacklisted[to], "Recipient is blacklisted");
 
         if (transferFee > 0 && msg.sender != feeCollector) {
-            require(amount >= transferFee, "Amount less than fee");
-            require(balanceOf(msg.sender) >= amount + transferFee, "Insufficient balance for transfer with fee");
-
-            _transfer(msg.sender, feeCollector, transferFee);
-
-            _transfer(msg.sender, to, amount);
+            require(amount > transferFee, "Amount less than fee");
+            
+            uint256 feeAmount = transferFee;
+            uint256 netAmount = amount - feeAmount;
+            
+            _transfer(msg.sender, feeCollector, feeAmount);
+            _transfer(msg.sender, to, netAmount);
             return true;
         }
 
@@ -119,18 +120,17 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
         require(!isBlacklisted[to], "Recipient is blacklisted");
 
         if (transferFee > 0 && from != feeCollector) {
-            require(amount >= transferFee, "Amount less than fee");
-            uint256 totalAmount = amount + transferFee;
-            require(balanceOf(from) >= totalAmount, "Insufficient balance for transfer with fee");
+            require(amount > transferFee, "Amount too small for fee");
+            
+            uint256 feeAmount = transferFee;
+            uint256 netAmount = amount - feeAmount;
 
             uint256 currentAllowance = allowance(from, msg.sender);
-            require(currentAllowance >= totalAmount, "Insufficient allowance for transfer with fee");
-
-            _spendAllowance(from, msg.sender, totalAmount);
-
-            _transfer(from, feeCollector, transferFee);
-
-            _transfer(from, to, amount);
+            require(currentAllowance >= amount, "Insufficient allowance");
+            
+            _spendAllowance(from, msg.sender, amount);
+            _transfer(from, feeCollector, feeAmount);
+            _transfer(from, to, netAmount);
             return true;
         }
 
