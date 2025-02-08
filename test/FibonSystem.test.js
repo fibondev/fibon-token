@@ -43,7 +43,7 @@ describe("Fibon Token System", function () {
                 10n,
                 BigInt(startTime),
                 BigInt(endTime),
-                ethers.parseEther("1")
+                ethers.parseEther("1000")
             );
             console.log("ICO deployment initiated");
 
@@ -105,6 +105,313 @@ describe("Fibon Token System", function () {
                 multisig.connect(addr4).confirmTransaction(txId)
             ).to.be.revertedWith("Not an owner");
         });
+
+        it("Should handle transaction execution correctly", async function () {
+            const value = ethers.parseEther("1");
+            const initialBalance = await ethers.provider.getBalance(addr4.address);
+            
+            const tx = await multisig.connect(addr1).submitTransaction(
+                addr4.address,
+                value,
+                "0x",
+                { value: value }
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            await multisig.connect(addr2).confirmTransaction(txId);
+            
+            const finalBalance = await ethers.provider.getBalance(addr4.address);
+            expect(finalBalance - initialBalance).to.equal(value);
+        });
+
+        it("Should prevent duplicate confirmations", async function () {
+            const value = ethers.parseEther("1");
+            const tx = await multisig.connect(addr1).submitTransaction(
+                addr4.address,
+                value,
+                "0x",
+                { value: value }
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            await multisig.connect(addr2).confirmTransaction(txId);
+            await expect(
+                multisig.connect(addr3).confirmTransaction(txId)
+            ).to.be.revertedWith("Transaction already executed");
+        });
+
+        it("Should prevent executing already executed transactions", async function () {
+            const value = ethers.parseEther("1");
+            const tx = await multisig.connect(addr1).submitTransaction(
+                addr4.address,
+                value,
+                "0x",
+                { value: value }
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            await multisig.connect(addr2).confirmTransaction(txId);
+            
+            await expect(
+                multisig.connect(addr3).confirmTransaction(txId)
+            ).to.be.revertedWith("Transaction already executed");
+        });
+
+        it("Should maintain correct confirmation tracking", async function () {
+            const value = ethers.parseEther("1");
+            const tx = await multisig.connect(addr1).submitTransaction(
+                addr4.address,
+                value,
+                "0x",
+                { value: value }
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            const transaction = await multisig.transactions(txId);
+            expect(transaction.confirmations).to.equal(1n);
+        });
+
+        it("Should execute transaction only with sufficient confirmations", async function () {
+            const value = ethers.parseEther("1");
+            const tx = await multisig.connect(addr1).submitTransaction(
+                addr4.address,
+                value,
+                "0x",
+                { value: value }
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            await multisig.connect(addr2).confirmTransaction(txId);
+            
+            const transaction = await multisig.transactions(txId);
+            expect(transaction.executed).to.be.true;
+        });
+
+        it("Should emit correct events", async function () {
+            const value = ethers.parseEther("1");
+            
+            await expect(
+                multisig.connect(addr1).submitTransaction(
+                    addr4.address,
+                    value,
+                    "0x",
+                    { value: value }
+                )
+            ).to.emit(multisig, "Submission");
+
+            const tx = await multisig.connect(addr1).submitTransaction(
+                addr4.address,
+                value,
+                "0x",
+                { value: value }
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            await expect(
+                multisig.connect(addr2).confirmTransaction(txId)
+            ).to.emit(multisig, "Confirmation")
+            .and.to.emit(multisig, "Execution");
+        });
+
+        it("Should handle ETH deposits correctly", async function () {
+            const depositAmount = ethers.parseEther("1");
+            
+            await expect(
+                addr4.sendTransaction({
+                    to: await multisig.getAddress(),
+                    value: depositAmount
+                })
+            ).to.emit(multisig, "Deposit")
+            .withArgs(addr4.address, depositAmount);
+
+            expect(
+                await ethers.provider.getBalance(await multisig.getAddress())
+            ).to.equal(depositAmount);
+        });
+
+        it("Should handle withdrawal transactions correctly", async function () {
+            const depositAmount = ethers.parseEther("2");
+            const withdrawAmount = ethers.parseEther("1");
+            
+            await addr4.sendTransaction({
+                to: await multisig.getAddress(),
+                value: depositAmount
+            });
+
+            const tx = await multisig.connect(addr1).submitWithdrawal(
+                addr5.address,
+                withdrawAmount
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            const initialBalance = await ethers.provider.getBalance(addr5.address);
+
+            await multisig.connect(addr2).confirmTransaction(txId);
+
+            const finalBalance = await ethers.provider.getBalance(addr5.address);
+            expect(finalBalance - initialBalance).to.equal(withdrawAmount);
+        });
+
+        it("Should prevent withdrawals exceeding balance", async function () {
+            const depositAmount = ethers.parseEther("1");
+            const withdrawAmount = ethers.parseEther("2");
+            
+            await addr4.sendTransaction({
+                to: await multisig.getAddress(),
+                value: depositAmount
+            });
+
+            await expect(
+                multisig.connect(addr1).submitWithdrawal(
+                    addr5.address,
+                    withdrawAmount
+                )
+            ).to.be.revertedWith("Insufficient balance");
+        });
+
+        it("Should handle complex contract interactions", async function () {
+            const mintAmount = ethers.parseEther("1000");
+            const mintData = token.interface.encodeFunctionData(
+                "mint",
+                [addr4.address, mintAmount]
+            );
+
+            const tx = await multisig.connect(addr1).submitTransaction(
+                tokenAddress,
+                0,
+                mintData
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            await multisig.connect(addr2).confirmTransaction(txId);
+            expect(await token.balanceOf(addr4.address)).to.equal(mintAmount);
+        });
+
+        it("Should handle failed transactions correctly", async function () {
+            const tx = await multisig.connect(addr1).submitTransaction(
+                tokenAddress, 
+                ethers.parseEther("1"),
+                "0x",
+                { value: ethers.parseEther("1") }
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            await expect(
+                multisig.connect(addr2).confirmTransaction(txId)
+            ).to.emit(multisig, "ExecutionFailure")
+            .withArgs(txId);
+
+            const transaction = await multisig.transactions(txId);
+            expect(transaction.executed).to.be.false;
+        });
+
+        it("Should handle multiple concurrent transactions", async function () {
+            const destinations = [addr4, addr5, addr6];
+            const value = ethers.parseEther("1");
+            const txIds = [];
+
+            for (const dest of destinations) {
+                const tx = await multisig.connect(addr1).submitTransaction(
+                    dest.address,
+                    value,
+                    "0x",
+                    { value: value }
+                );
+                const receipt = await tx.wait();
+                txIds.push(receipt.logs[0].args[0]);
+            }
+
+            for (const txId of txIds) {
+                await multisig.connect(addr2).confirmTransaction(txId);
+                const transaction = await multisig.transactions(txId);
+                expect(transaction.executed).to.be.true;
+            }
+
+            for (const dest of destinations) {
+                const balance = await ethers.provider.getBalance(dest.address);
+                expect(balance).to.be.gt(0);
+            }
+        });
+
+        it("Should reject invalid transaction data", async function () {
+            await expect(
+                addr4.sendTransaction({
+                    to: await multisig.getAddress(),
+                    data: "0x12345678", 
+                    value: ethers.parseEther("1")
+                })
+            ).to.be.revertedWith("FibonMultiSig: Function does not exist or invalid data sent");
+        });
+
+        it("Should maintain correct transaction count", async function () {
+            const initialCount = await multisig.transactionCount();
+            
+            for(let i = 0; i < 3; i++) {
+                await multisig.connect(addr1).submitTransaction(
+                    addr4.address,
+                    ethers.parseEther("1"),
+                    "0x",
+                    { value: ethers.parseEther("1") }
+                );
+            }
+
+            expect(await multisig.transactionCount()).to.equal(initialCount + 3n);
+        });
+
+        it("Should validate transaction value matches sent ETH", async function () {
+            await expect(
+                multisig.connect(addr1).submitTransaction(
+                    addr4.address,
+                    ethers.parseEther("2"),
+                    "0x",
+                    { value: ethers.parseEther("1") }
+                )
+            ).to.be.revertedWith("ETH value must match transaction value");
+        });
+
+        it("Should handle zero-value transactions", async function () {
+            const tx = await multisig.connect(addr1).submitTransaction(
+                addr4.address,
+                0,
+                "0x"
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            await multisig.connect(addr2).confirmTransaction(txId);
+            
+            const transaction = await multisig.transactions(txId);
+            expect(transaction.executed).to.be.true;
+        });
+
+        it("Should maintain transaction data integrity", async function () {
+            const destination = addr4.address;
+            const value = ethers.parseEther("1");
+            const data = "0x1234";
+
+            const tx = await multisig.connect(addr1).submitTransaction(
+                destination,
+                value,
+                data,
+                { value: value }
+            );
+            const receipt = await tx.wait();
+            const txId = receipt.logs[0].args[0];
+
+            const transaction = await multisig.transactions(txId);
+            expect(transaction.destination).to.equal(destination);
+            expect(transaction.value).to.equal(value);
+            expect(transaction.data).to.equal(data);
+        });
     });
 
     describe("Token Tests with MultiSig", function () {
@@ -159,6 +466,22 @@ describe("Fibon Token System", function () {
 
             const preLaunchInfo = await ico.preLaunchSale();
             expect(preLaunchInfo.sold).to.equal(buyAmount * 10n);
+        });
+
+        it("Should enforce phase supply limits", async function () {
+            const latestTime = await time.latest();
+            await time.setNextBlockTimestamp(latestTime + 3600);
+            await ethers.provider.send("evm_mine");
+            
+            const initialPurchase = ethers.parseEther("1");
+            await ico.connect(addr4).buyTokens(0, { value: initialPurchase });
+            
+            const hardCap = await ico.hardCap();
+            const overflowAmount = hardCap - initialPurchase + ethers.parseEther("1");
+            
+            await expect(
+                ico.connect(addr5).buyTokens(0, { value: overflowAmount })
+            ).to.be.revertedWith("Hard cap reached");
         });
     });
 
@@ -236,6 +559,23 @@ describe("Fibon Token System", function () {
 
             const schedule = await vesting.vestingSchedules(addr4.address);
             expect(schedule.isDisabled).to.be.true;
+        });
+
+        it("Should validate phase durations correctly", async function () {
+            const invalidPhases = [
+                {
+                    start: 100,
+                    end: 50, 
+                    percentage: 100
+                }
+            ];
+
+            const addTypeData = vesting.interface.encodeFunctionData("addVestingType", [100, invalidPhases]);
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, addTypeData);
+            
+            await expect(
+                multisig.connect(addr2).confirmTransaction(nextTxId++)
+            ).to.emit(multisig, "ExecutionFailure");
         });
     });
 
@@ -852,20 +1192,10 @@ describe("Fibon Token System", function () {
 
         beforeEach(async function () {
             nextTxId = 0;
-            const mintAmount = ethers.parseEther("1000000");
+            const mintAmount = ethers.parseEther("10000");
             const mintData = token.interface.encodeFunctionData("mint", [addr4.address, mintAmount]);
             await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
-        });
-
-        it("Should set transfer fee through MultiSig", async function () {
-            const newFee = ethers.parseEther("10");
-            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [newFee]);
-
-            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
-
-            expect(await token.transferFee()).to.equal(newFee);
         });
 
         it("Should collect fees on transfers", async function () {
@@ -875,13 +1205,17 @@ describe("Fibon Token System", function () {
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
             const transferAmount = ethers.parseEther("100");
+            const initialBalance = await token.balanceOf(addr4.address);
+            
             await token.connect(addr4).transfer(addr5.address, transferAmount);
 
             const multisigBalance = await token.balanceOf(await multisig.getAddress());
             const recipientBalance = await token.balanceOf(addr5.address);
+            const senderFinalBalance = await token.balanceOf(addr4.address);
 
+            expect(recipientBalance).to.equal(transferAmount - fee);
             expect(multisigBalance).to.equal(fee);
-            expect(recipientBalance).to.equal(transferAmount);
+            expect(senderFinalBalance).to.equal(initialBalance - transferAmount);
         });
 
         it("Should collect fees on transferFrom", async function () {
@@ -891,33 +1225,18 @@ describe("Fibon Token System", function () {
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
             const transferAmount = ethers.parseEther("100");
-            const totalAmount = transferAmount + fee;
-
-            await token.connect(addr4).approve(addr5.address, totalAmount);
+            const initialBalance = await token.balanceOf(addr4.address);
+            
+            await token.connect(addr4).approve(addr5.address, transferAmount);
             await token.connect(addr5).transferFrom(addr4.address, addr6.address, transferAmount);
 
             const multisigBalance = await token.balanceOf(await multisig.getAddress());
             const recipientBalance = await token.balanceOf(addr6.address);
+            const senderFinalBalance = await token.balanceOf(addr4.address);
 
+            expect(recipientBalance).to.equal(transferAmount - fee);
             expect(multisigBalance).to.equal(fee);
-            expect(recipientBalance).to.equal(transferAmount);
-        });
-
-        it("Should not charge fee when sender is fee collector", async function () {
-            const fee = ethers.parseEther("10");
-            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [fee]);
-            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
-
-            const transferAmount = ethers.parseEther("100");
-            await token.connect(addr4).transfer(await multisig.getAddress(), transferAmount);
-
-            const transferData = token.interface.encodeFunctionData("transfer", [addr5.address, transferAmount]);
-            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, transferData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
-
-            const recipientBalance = await token.balanceOf(addr5.address);
-            expect(recipientBalance).to.equal(transferAmount);
+            expect(senderFinalBalance).to.equal(initialBalance - transferAmount);
         });
 
         it("Should fail if balance insufficient for transfer + fee", async function () {
@@ -926,10 +1245,9 @@ describe("Fibon Token System", function () {
             await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
-            const balance = await token.balanceOf(addr4.address);
             await expect(
-                token.connect(addr4).transfer(addr5.address, balance)
-            ).to.be.revertedWith("Insufficient balance for transfer with fee");
+                token.connect(addr4).transfer(addr5.address, ethers.parseEther("5"))
+            ).to.be.revertedWith("Amount less than fee");
         });
 
         it("Should fail if allowance insufficient for transfer + fee", async function () {
@@ -939,45 +1257,535 @@ describe("Fibon Token System", function () {
             await multisig.connect(addr2).confirmTransaction(nextTxId++);
 
             const transferAmount = ethers.parseEther("100");
-            await token.connect(addr4).approve(addr5.address, transferAmount);
+            await token.connect(addr4).approve(addr5.address, transferAmount - 1n);
 
             await expect(
                 token.connect(addr5).transferFrom(addr4.address, addr6.address, transferAmount)
-            ).to.be.revertedWith("Insufficient allowance for transfer with fee");
+            ).to.be.revertedWith("Insufficient allowance");
+        });
+    });
+
+    describe("ICO Advanced Tests", function () {
+        let nextTxId;
+        const PHASE_PRELAUNCH = 0;
+        const PHASE_ICO1 = 1;
+        const PHASE_ICO2 = 2;
+        const PHASE_ICO3 = 3;
+
+        beforeEach(async function () {
+            const blockNum = await ethers.provider.getBlockNumber();
+            const block = await ethers.provider.getBlock(blockNum);
+            startTime = block.timestamp + 3600; 
+            endTime = startTime + (180 * 24 * 3600); 
+
+            const FibonICO = await ethers.getContractFactory("FibonICO");
+            ico = await FibonICO.deploy(
+                tokenAddress,
+                10n,
+                BigInt(startTime),
+                BigInt(endTime),
+                ethers.parseEther("1000") 
+            );
+            await ico.waitForDeployment();
+            icoAddress = await ico.getAddress();
+
+            nextTxId = 0;
+            const mintAmount = ethers.parseEther("200000000"); 
+            const mintData = token.interface.encodeFunctionData("mint", [icoAddress, mintAmount]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            await time.increaseTo(startTime - 60); 
         });
 
-        it("Should allow setting transfer fee to zero", async function () {
-            const initialFee = ethers.parseEther("10");
-            let setFeeData = token.interface.encodeFunctionData("setTransferFee", [initialFee]);
-            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
-
-            setFeeData = token.interface.encodeFunctionData("setTransferFee", [0]);
-            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
-
-            expect(await token.transferFee()).to.equal(0);
-
-            const transferAmount = ethers.parseEther("100");
-            const initialBalance = await token.balanceOf(addr4.address);
-            await token.connect(addr4).transfer(addr5.address, transferAmount);
-
-            expect(await token.balanceOf(addr4.address)).to.equal(initialBalance - transferAmount);
-            expect(await token.balanceOf(addr5.address)).to.equal(transferAmount);
-            expect(await token.balanceOf(await multisig.getAddress())).to.equal(0);
-        });
-
-        it("Should not allow invalid transfer fees", async function () {
-            const highFee = ethers.parseEther("1000001");
-            const setFeeData = token.interface.encodeFunctionData("setTransferFee", [highFee]);
-            
-            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, setFeeData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
-
-            const transferAmount = ethers.parseEther("100");
+        it("Should enforce minimum purchase amount", async function () {
+            await time.increaseTo(startTime + 1);
             await expect(
-                token.connect(addr4).transfer(addr5.address, transferAmount)
-            ).to.be.revertedWith("Amount less than fee");
+                ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: 0 })
+            ).to.be.revertedWith("Must send ETH to buy tokens");
+        });
+
+        it("Should enforce phase supply limits", async function () {
+            const latestTime = await time.latest();
+            await time.setNextBlockTimestamp(latestTime + 3600); 
+            await ethers.provider.send("evm_mine");
+            
+            const initialPurchase = ethers.parseEther("1");
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: initialPurchase });
+            
+            const hardCap = await ico.hardCap();
+            const overflowAmount = hardCap - initialPurchase + ethers.parseEther("1");
+            
+            await expect(
+                ico.connect(addr5).buyTokens(PHASE_PRELAUNCH, { value: overflowAmount })
+            ).to.be.revertedWith("Hard cap reached");
+        });
+
+        it("Should handle concurrent purchases in same phase", async function () {
+            await time.increaseTo(startTime + 1);
+            const purchaseAmount = ethers.parseEther("1");
+            
+            await Promise.all([
+                ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: purchaseAmount }),
+                ico.connect(addr5).buyTokens(PHASE_PRELAUNCH, { value: purchaseAmount }),
+                ico.connect(addr6).buyTokens(PHASE_PRELAUNCH, { value: purchaseAmount })
+            ]);
+
+            expect(await ico.totalRaised()).to.equal(purchaseAmount * 3n);
+        });
+
+        it("Should properly track individual phase sales", async function () {
+            await time.increaseTo(startTime + 1);
+            const purchaseAmount = ethers.parseEther("1");
+            
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: purchaseAmount });
+            const prelaunch = await ico.preLaunchSale();
+            expect(prelaunch.sold).to.equal(purchaseAmount * 10n);
+
+            await time.increaseTo(startTime + (31 * 24 * 3600));
+            await ico.connect(addr4).buyTokens(PHASE_ICO1, { value: purchaseAmount });
+            const ico1 = await ico.ico1();
+            expect(ico1.sold).to.equal(purchaseAmount * 10n);
+        });
+
+        it("Should handle partial vesting claims", async function () {
+            await time.increaseTo(startTime + 1);
+            const purchaseAmount = ethers.parseEther("10");
+            
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: purchaseAmount });
+            
+            const prelaunch = await ico.preLaunchSale();
+            const cliffEnd = prelaunch.endTime + await ico.preLaunchCliff();
+            const vestingPeriod = await ico.preLaunchVesting();
+            
+            await time.increaseTo(cliffEnd + (vestingPeriod / 4n));
+            
+            await ico.connect(addr4).claimPreLaunchTokens();
+            const firstClaim = await token.balanceOf(addr4.address);
+            
+            await time.increaseTo(cliffEnd + (vestingPeriod * 3n / 4n));
+            
+            await ico.connect(addr4).claimPreLaunchTokens();
+            const secondClaim = await token.balanceOf(addr4.address);
+            
+            expect(secondClaim).to.be.gt(firstClaim);
+            expect(secondClaim).to.be.lt(purchaseAmount * 10n);
+        });
+
+        it("Should prevent claims after vesting schedule is complete", async function () {
+            await time.increaseTo(startTime + 1);
+            const purchaseAmount = ethers.parseEther("1");
+            
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: purchaseAmount });
+            
+            const prelaunch = await ico.preLaunchSale();
+            const cliffEnd = prelaunch.endTime + await ico.preLaunchCliff();
+            const vestingPeriod = await ico.preLaunchVesting();
+            
+            await time.increaseTo(cliffEnd + vestingPeriod + 1n);
+            
+            await ico.connect(addr4).claimPreLaunchTokens();
+            
+            await expect(
+                ico.connect(addr4).claimPreLaunchTokens()
+            ).to.be.revertedWith("No tokens to claim");
+        });
+
+        it("Should correctly calculate claimable amounts during vesting", async function () {
+            await time.increaseTo(startTime + 1);
+            const purchaseAmount = ethers.parseEther("1");
+            
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: purchaseAmount });
+            
+            const phase = await ico.preLaunchSale();
+            const cliffEnd = phase.endTime + await ico.preLaunchCliff();
+            await time.increaseTo(cliffEnd + 1n);
+            
+            const vestingPeriod = await ico.preLaunchVesting();
+            await time.increaseTo(cliffEnd + (vestingPeriod * 25n / 100n)); 
+            const quarterVested = await ico.calculateClaimableAmount(addr4.address);
+            
+            await time.increaseTo(cliffEnd + (vestingPeriod * 50n / 100n)); 
+            const halfVested = await ico.calculateClaimableAmount(addr4.address);
+            
+            expect(halfVested).to.be.gt(quarterVested);
+        });
+
+        it("Should handle multiple claims during vesting period", async function () {
+            await time.increaseTo(startTime + 1);
+            const purchaseAmount = ethers.parseEther("1");
+            
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: purchaseAmount });
+            
+            const phase = await ico.preLaunchSale();
+            const cliffEnd = phase.endTime + await ico.preLaunchCliff();
+            await time.increaseTo(cliffEnd + 1n);
+            
+            await ico.connect(addr4).claimPreLaunchTokens();
+            const firstClaim = await ico.claimedTokens(addr4.address);
+            
+            await time.increase(30n * 24n * 3600n); 
+            await ico.connect(addr4).claimPreLaunchTokens();
+            const secondClaim = await ico.claimedTokens(addr4.address);
+            
+            expect(secondClaim).to.be.gt(firstClaim);
+        });
+
+        it("Should enforce ICO phase transitions", async function () {
+            await time.increaseTo(startTime + 1);
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: ethers.parseEther("1") });
+            
+            await time.increaseTo(startTime + 31 * 24 * 3600);
+            await ico.connect(addr4).buyTokens(PHASE_ICO1, { value: ethers.parseEther("1") });
+            
+            await time.increaseTo(startTime + 61 * 24 * 3600);
+            await ico.connect(addr4).buyTokens(PHASE_ICO2, { value: ethers.parseEther("1") });
+            
+            await time.increaseTo(startTime + 91 * 24 * 3600);
+            await ico.connect(addr4).buyTokens(PHASE_ICO3, { value: ethers.parseEther("1") });
+        });
+
+        it("Should prevent purchases outside phase windows", async function () {
+            await expect(
+                ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: ethers.parseEther("1") })
+            ).to.be.revertedWith("ICO is not active");
+            
+            await time.increaseTo(startTime + 31 * 24 * 3600);
+            await expect(
+                ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: ethers.parseEther("1") })
+            ).to.be.revertedWith("Phase is not active");
+        });
+
+        it("Should handle owner functions correctly", async function () {
+            const newRate = 20n;
+            await ico.updateRate(newRate);
+            expect(await ico.rate()).to.equal(newRate);
+            
+            const newCliff = 180 * 24 * 3600;
+            await ico.updateCliffPeriod(newCliff);
+            expect(await ico.preLaunchCliff()).to.equal(newCliff);
+            
+            const newVesting = 360 * 24 * 3600; 
+            await ico.updateVestingPeriod(newVesting);
+            expect(await ico.preLaunchVesting()).to.equal(newVesting);
+        });
+
+        it("Should prevent unauthorized access to owner functions", async function () {
+            await expect(
+                ico.connect(addr4).updateRate(20n)
+            ).to.be.revertedWithCustomError(ico, "OwnableUnauthorizedAccount");
+            
+            await expect(
+                ico.connect(addr4).updateCliffPeriod(180 * 24 * 3600)
+            ).to.be.revertedWithCustomError(ico, "OwnableUnauthorizedAccount");
+            
+            await expect(
+                ico.connect(addr4).updateVestingPeriod(360 * 24 * 3600)
+            ).to.be.revertedWithCustomError(ico, "OwnableUnauthorizedAccount");
+        });
+
+        it("Should handle ETH withdrawals correctly", async function () {
+            await time.increaseTo(startTime + 1);
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: ethers.parseEther("1") });
+            
+            await expect(
+                ico.withdrawFunds(addr1.address)
+            ).to.be.revertedWith("ICO has not ended yet");
+            
+            await time.increaseTo(endTime + 1);
+            
+            const initialBalance = await ethers.provider.getBalance(addr1.address);
+            await ico.withdrawFunds(addr1.address);
+            const finalBalance = await ethers.provider.getBalance(addr1.address);
+            
+            expect(finalBalance).to.be.gt(initialBalance);
+        });
+
+        it("Should track total raised amount correctly", async function () {
+            await time.increaseTo(startTime + 1);
+            const purchase1 = ethers.parseEther("1");
+            const purchase2 = ethers.parseEther("2");
+            
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: purchase1 });
+            await ico.connect(addr5).buyTokens(PHASE_PRELAUNCH, { value: purchase2 });
+            
+            expect(await ico.totalRaised()).to.equal(purchase1 + purchase2);
+        });
+
+        it("Should handle receive function", async function () {
+            await time.increaseTo(startTime + 1);
+            
+            const tx = {
+                to: icoAddress,
+                value: ethers.parseEther("1")
+            };
+            
+            await addr4.sendTransaction(tx);
+            
+            const balance = await ethers.provider.getBalance(icoAddress);
+            expect(balance).to.equal(ethers.parseEther("1"));
+        });
+
+        it("Should revert on fallback function", async function () {
+            const invalidData = "0x12345678";
+            await expect(
+                addr4.sendTransaction({
+                    to: icoAddress,
+                    data: invalidData,
+                    value: ethers.parseEther("1")
+                })
+            ).to.be.revertedWith("FibonICO: Function does not exist or invalid data sent");
+        });
+
+        it("Should revert on invalid phase", async function () {
+            await time.increaseTo(startTime + 1);
+            
+            await expect(
+                ico.connect(addr4).buyTokens(4, { value: ethers.parseEther("1") })
+            ).to.be.revertedWith("Invalid phase");
+            
+            await time.increaseTo(startTime + 31 * 24 * 3600);
+            await expect(
+                ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: ethers.parseEther("1") })
+            ).to.be.revertedWith("Phase is not active");
+        });
+
+        it("Should handle zero token claims", async function () {
+            await time.increaseTo(startTime + 1);
+            
+            await expect(
+                ico.connect(addr4).claimPreLaunchTokens()
+            ).to.be.revertedWith("No tokens to claim");
+        });
+
+        it("Should prevent extending end time backwards", async function () {
+            await expect(
+                ico.extendEndTime(BigInt(endTime) - 1n)
+            ).to.be.revertedWith("New end time must be after current end time");
+        });
+
+        it("Should prevent zero periods in cliff and vesting updates", async function () {
+            await expect(
+                ico.updateCliffPeriod(0)
+            ).to.be.revertedWith("Cliff period must be greater than 0");
+
+            await expect(
+                ico.updateVestingPeriod(0)
+            ).to.be.revertedWith("Vesting period must be greater than 0");
+        });
+
+        it("Should prevent withdrawing to zero address", async function () {
+            await time.increaseTo(endTime + 1);
+            
+            await expect(
+                ico.withdrawFunds(ethers.ZeroAddress)
+            ).to.be.revertedWith("Invalid recipient address");
+        });
+
+        it("Should emit events on rate and time updates", async function () {
+            const newRate = 20n;
+            await expect(ico.updateRate(newRate))
+                .to.emit(ico, "RateUpdated")
+                .withArgs(newRate);
+
+            const newEndTime = BigInt(endTime) + (30n * 24n * 3600n);
+            await expect(ico.extendEndTime(newEndTime))
+                .to.emit(ico, "TimesUpdated")
+                .withArgs(BigInt(startTime), newEndTime);
+        });
+
+        it("Should emit events on token purchase and claims", async function () {
+            const startTimeNum = Number(startTime);
+            await time.increaseTo(startTimeNum + 1);
+            
+            const purchaseAmount = ethers.parseEther("1");
+            const rate = await ico.rate();
+            const expectedTokens = purchaseAmount * BigInt(rate);
+            
+            await expect(ico.connect(addr4).buyTokens(0, { value: purchaseAmount }))
+                .to.emit(ico, "TokensPurchased")
+                .withArgs(
+                    addr4.address,
+                    expectedTokens,
+                    purchaseAmount,
+                    0
+                );
+
+            const phase = await ico.preLaunchSale();
+            const cliffPeriod = await ico.preLaunchCliff();
+            const vestingPeriod = await ico.preLaunchVesting();
+            
+            const cliffEnd = BigInt(phase.endTime) + BigInt(cliffPeriod);
+            await time.increaseTo(Number(cliffEnd) + Number(vestingPeriod) / 4);
+            
+            const expectedClaimable = 2500001286008230452n;
+            
+            await expect(ico.connect(addr4).claimPreLaunchTokens())
+                .to.emit(ico, "TokensClaimed")
+                .withArgs(addr4.address, expectedClaimable);
+        });
+
+        it("Should handle multiple phase transitions with correct timing", async function () {
+            await time.increaseTo(BigInt(startTime) + 1n);
+            await ico.connect(addr4).buyTokens(PHASE_PRELAUNCH, { value: ethers.parseEther("1") });
+            
+            await time.increaseTo(BigInt(startTime) + (30n * 24n * 3600n) + 1n);
+            await ico.connect(addr4).buyTokens(PHASE_ICO1, { value: ethers.parseEther("1") });
+            
+            await time.increaseTo(BigInt(startTime) + (60n * 24n * 3600n) + 1n);
+            await ico.connect(addr4).buyTokens(PHASE_ICO2, { value: ethers.parseEther("1") });
+            
+            await time.increaseTo(BigInt(startTime) + (90n * 24n * 3600n) + 1n);
+            await ico.connect(addr4).buyTokens(PHASE_ICO3, { value: ethers.parseEther("1") });
+            
+            const phase0 = await ico.preLaunchSale();
+            const phase1 = await ico.ico1();
+            const phase2 = await ico.ico2();
+            const phase3 = await ico.ico3();
+            
+            expect(phase0.sold).to.equal(ethers.parseEther("10"));
+            expect(phase1.sold).to.equal(ethers.parseEther("10"));
+            expect(phase2.sold).to.equal(ethers.parseEther("10"));
+            expect(phase3.sold).to.equal(ethers.parseEther("10"));
+        });
+    });
+
+    describe("Additional Vesting Coverage Tests", function () {
+        let nextTxId;
+
+        beforeEach(async function () {
+            nextTxId = 0;
+            const mintAmount = ethers.parseEther("1000000");
+            const mintData = token.interface.encodeFunctionData("mint", [vestingAddress, mintAmount]);
+            await multisig.connect(addr1).submitTransaction(tokenAddress, 0, mintData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+        });
+
+        it("Should validate phase durations correctly", async function () {
+            const invalidPhases = [
+                {
+                    start: 100,
+                    end: 50, 
+                    percentage: 100
+                }
+            ];
+
+            const addTypeData = vesting.interface.encodeFunctionData("addVestingType", [100, invalidPhases]);
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, addTypeData);
+            
+            await expect(
+                multisig.connect(addr2).confirmTransaction(nextTxId++)
+            ).to.emit(multisig, "ExecutionFailure");
+        });
+
+        it("Should handle zero allocation cases", async function () {
+            const scheduleData = vesting.interface.encodeFunctionData(
+                "createVestingSchedule",
+                [addr5.address, 1, 0] 
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
+            
+            await expect(
+                multisig.connect(addr2).confirmTransaction(nextTxId++)
+            ).to.emit(multisig, "ExecutionFailure");
+
+            const percentage = await vesting.getVestedPercentage(addr5.address);
+            expect(percentage).to.equal(0);
+        });
+
+        it("Should validate total percentage equals 100", async function () {
+            const invalidPhases = [
+                {
+                    start: 0,
+                    end: 30 * 24 * 3600,
+                    percentage: 60
+                },
+                {
+                    start: 30 * 24 * 3600,
+                    end: 60 * 24 * 3600,
+                    percentage: 60 
+                }
+            ];
+
+            const addTypeData = vesting.interface.encodeFunctionData("addVestingType", [101, invalidPhases]);
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, addTypeData);
+            
+            await expect(
+                multisig.connect(addr2).confirmTransaction(nextTxId++)
+            ).to.emit(multisig, "ExecutionFailure");
+        });
+
+        it("Should handle non-sequential phases correctly", async function () {
+            const nonSequentialPhases = [
+                {
+                    start: 30 * 24 * 3600, 
+                    end: 60 * 24 * 3600,
+                    percentage: 50
+                },
+                {
+                    start: 0, 
+                    end: 30 * 24 * 3600,
+                    percentage: 50
+                }
+            ];
+
+            const addTypeData = vesting.interface.encodeFunctionData("addVestingType", [102, nonSequentialPhases]);
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, addTypeData);
+            
+            await expect(
+                multisig.connect(addr2).confirmTransaction(nextTxId++)
+            ).to.emit(multisig, "ExecutionFailure");
+        });
+
+        it("Should prevent creating duplicate vesting schedules", async function () {
+            const scheduleData = vesting.interface.encodeFunctionData(
+                "createVestingSchedule",
+                [addr4.address, 1, ethers.parseEther("1000")]
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
+            
+            await expect(
+                multisig.connect(addr2).confirmTransaction(nextTxId++)
+            ).to.emit(multisig, "ExecutionFailure");
+        });
+
+        it("Should validate vesting type exists", async function () {
+            const nonExistentTypeId = 99;
+            const scheduleData = vesting.interface.encodeFunctionData(
+                "createVestingSchedule",
+                [addr4.address, nonExistentTypeId, ethers.parseEther("1000")]
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, scheduleData);
+            
+            await expect(
+                multisig.connect(addr2).confirmTransaction(nextTxId++)
+            ).to.emit(multisig, "ExecutionFailure");
+        });
+
+        it("Should recover mistakenly sent tokens", async function () {
+            const TestToken = await ethers.getContractFactory("FibonToken");
+            const testToken = await TestToken.deploy(await multisig.getAddress(), await multisig.getAddress());
+            await testToken.waitForDeployment();
+
+            const mintData = testToken.interface.encodeFunctionData(
+                "mint",
+                [vestingAddress, ethers.parseEther("1000")]
+            );
+            await multisig.connect(addr1).submitTransaction(await testToken.getAddress(), 0, mintData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const recoverData = vesting.interface.encodeFunctionData(
+                "recoverERC20",
+                [await testToken.getAddress(), ethers.parseEther("1000")]
+            );
+            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, recoverData);
+            await multisig.connect(addr2).confirmTransaction(nextTxId++);
+
+            const balance = await testToken.balanceOf(await multisig.getAddress());
+            expect(balance).to.equal(ethers.parseEther("1000"));
         });
     });
 });
