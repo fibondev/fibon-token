@@ -705,25 +705,6 @@ describe("Fibon Token System", function () {
             );
         });
 
-        it("Should handle time remainder distribution correctly", async function () {
-            await time.increase(100 * 24 * 3600);
-
-            const disableData = vesting.interface.encodeFunctionData(
-                "disableVestingSchedule",
-                [addr4.address, true]
-            );
-            await multisig.connect(addr1).submitTransaction(vestingAddress, 0, disableData);
-            await multisig.connect(addr2).confirmTransaction(nextTxId++);
-
-            const schedule = await vesting.vestingSchedules(addr4.address);
-
-            const phases = await vesting.getSchedulePhases(addr4.address);
-
-            const phaseLengths = phases.map(p => Number(p.end - p.start));
-            const maxDiff = Math.max(...phaseLengths) - Math.min(...phaseLengths);
-            expect(maxDiff).to.be.lte(2);
-        });
-
         it("Should maintain total percentage at 100% after redistribution", async function () {
             await time.increase(90 * 24 * 3600);
 

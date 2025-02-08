@@ -472,59 +472,17 @@ contract FibonVesting is Ownable {
         require(!schedule.isDisabled, "Schedule already disabled");
         require(_disabled, "Can only disable schedules");
 
-        (uint256 totalVested, uint256 totalReleased, ) = getVestedAmount(_beneficiary);
+        (uint256 totalVested, uint256 totalReleased, uint256 releasable) = getVestedAmount(_beneficiary);
+        
+        if (releasable > 0) {
+            schedule.releasedAmount += releasable;
+            token.safeTransfer(_beneficiary, releasable);
+            emit TokensReleased(_beneficiary, releasable);
+        }
 
         uint256 remainingTokens = totalAllocation[_beneficiary] - totalVested;
-        uint256 totalAmount = totalAllocation[_beneficiary];
-
-        uint256 originalEndTime = schedule.startTime + schedule.phases[schedule.phases.length - 1].end;
-        uint256 currentTime = block.timestamp;
-        uint256 remainingTime = originalEndTime > currentTime ? originalEndTime - currentTime : 0;
-
-        if (remainingTime > 0 && remainingTokens > 0) {
-            uint256 basePhaseLength = remainingTime / 3;
-            uint256 timeRemainder = remainingTime % 3;
-
-            uint256 phase1Length = basePhaseLength;
-            uint256 phase2Length = basePhaseLength + (timeRemainder > 0 ? 1 : 0);
-            uint256 phase3Length = basePhaseLength + (timeRemainder > 1 ? 1 : 0);
-
-            delete vestingSchedules[_beneficiary].phases;
-
-            uint256 earnedPercentage = (totalVested * 100) / totalAmount;
-            uint256 remainingPercentage = 100 - earnedPercentage;
-
-            uint256 baseEarnedPerPhase = earnedPercentage / 3;
-            uint256 earnedRemainder = earnedPercentage % 3;
-
-            uint256 phase1EarnedPercentage = baseEarnedPerPhase;
-            uint256 phase2EarnedPercentage = baseEarnedPerPhase + (earnedRemainder > 0 ? 1 : 0);
-
-            uint256 phase1Percentage = phase1EarnedPercentage + (remainingPercentage * 20) / 100;
-            uint256 phase2Percentage = phase2EarnedPercentage + (remainingPercentage * 35) / 100;
-            uint256 phase3Percentage = 100 - phase1Percentage - phase2Percentage;
-
-            vestingSchedules[_beneficiary].phases.push(VestingPhase({
-                start: 0,
-                end: phase1Length,
-                percentage: phase1Percentage
-            }));
-
-            vestingSchedules[_beneficiary].phases.push(VestingPhase({
-                start: phase1Length,
-                end: phase1Length + phase2Length,
-                percentage: phase2Percentage
-            }));
-
-            vestingSchedules[_beneficiary].phases.push(VestingPhase({
-                start: phase1Length + phase2Length,
-                end: phase1Length + phase2Length + phase3Length,
-                percentage: phase3Percentage
-            }));
-
-            vestingSchedules[_beneficiary].startTime = currentTime;
-            vestingSchedules[_beneficiary].releasedAmount = totalReleased;
-        }
+        totalAllocated -= remainingTokens;
+        totalAllocation[_beneficiary] = totalVested;
 
         schedule.isDisabled = true;
         emit VestingScheduleDisabled(_beneficiary);
