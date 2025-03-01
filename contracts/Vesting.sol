@@ -56,18 +56,12 @@ contract FibonVesting is Ownable {
     /// @param typeId The ID of the vesting type.
     event VestingTypeAdded(uint8 typeId);
 
-    /// @notice Emitted when a beneficiary's vesting is revoked.
-    /// @param beneficiary The address of the beneficiary whose vesting is revoked.
-    /// @param amount The amount of tokens revoked.
-    event VestingRevoked(address indexed beneficiary, uint256 amount);
-
     /// @notice Emitted when a vesting schedule is disabled.
     /// @param beneficiary The address of the beneficiary whose schedule is disabled.
     event VestingScheduleDisabled(address indexed beneficiary);
 
-    /// @notice Emitted when a vesting schedule is enabled.
-    /// @param beneficiary The address of the beneficiary whose schedule is enabled.
-    event VestingScheduleEnabled(address indexed beneficiary);
+    /// @notice Flag to track if vesting schedules have been initialized
+    bool public vestingInitialized;
 
     /**
      * @dev Initializes the vesting contract.
@@ -248,7 +242,6 @@ contract FibonVesting is Ownable {
 
         uint256 totalPercentage;
         for (uint256 i = 0; i < phases.length; i++) {
-            require(phases[i].end >= phases[i].start, "Phase end must be after or equal to start");
             totalPercentage += phases[i].percentage;
         }
         require(totalPercentage == 100, "Total percentages must equal 100");
@@ -258,41 +251,6 @@ contract FibonVesting is Ownable {
         }
 
         emit VestingTypeAdded(typeId);
-    }
-
-    /**
-     * @notice Creates a new vesting schedule for a beneficiary using a predefined vesting type.
-     * @dev Only the owner can call this function.
-     * @param _beneficiary The address of the beneficiary.
-     * @param typeId The ID of the predefined vesting type.
-     * @param _amount The total amount of tokens allocated to the beneficiary.
-     */
-    function createVestingSchedule(
-        address _beneficiary,
-        uint8 typeId,
-        uint256 _amount
-    ) external onlyOwner {
-        require(_beneficiary != address(0), "Invalid beneficiary address");
-        require(_amount > 0, "Amount must be greater than 0");
-        require(vestingSchedules[_beneficiary].startTime == 0, "Vesting schedule already exists");
-
-        VestingPhase[] storage vtPhases = vestingTypes[typeId];
-        require(vtPhases.length > 0, "Invalid vesting type");
-
-        require(token.balanceOf(address(this)) >= _amount, "Insufficient contract balance");
-
-        vestingSchedules[_beneficiary].startTime = block.timestamp;
-        vestingSchedules[_beneficiary].releasedAmount = 0;
-        vestingSchedules[_beneficiary].isDisabled = false;
-
-        for (uint256 i = 0; i < vtPhases.length; i++) {
-            vestingSchedules[_beneficiary].phases.push(vtPhases[i]);
-        }
-
-        totalAllocation[_beneficiary] = _amount;
-        totalAllocated += _amount;
-
-        emit VestingScheduleCreated(_beneficiary, _amount);
     }
 
     /**
@@ -351,28 +309,6 @@ contract FibonVesting is Ownable {
         }
 
         return totalVested - schedule.releasedAmount;
-    }
-
-    /**
-     * @notice Allows the owner to revoke a beneficiary's unvested tokens.
-     * @dev Only the owner can call this function.
-     *      The function will revert if there are no tokens to revoke.
-     * @param _beneficiary The address of the beneficiary to revoke.
-     */
-    function revokeBeneficiary(address _beneficiary) external onlyOwner {
-        VestingSchedule storage schedule = vestingSchedules[_beneficiary];
-        require(schedule.startTime != 0, "No vesting schedule for beneficiary");
-
-        uint256 remainingAllocation = totalAllocation[_beneficiary] - schedule.releasedAmount;
-        require(remainingAllocation > 0, "No tokens to revoke");
-
-        totalAllocated -= remainingAllocation;
-        totalAllocation[_beneficiary] = schedule.releasedAmount;
-        delete vestingSchedules[_beneficiary];
-
-        token.safeTransfer(owner(), remainingAllocation);
-
-        emit VestingRevoked(_beneficiary, remainingAllocation);
     }
 
     /**
@@ -466,11 +402,10 @@ contract FibonVesting is Ownable {
      * @dev Only the owner can call this function.
      * @param _beneficiary The address of the beneficiary whose schedule is to be disabled.
      */
-    function disableVestingSchedule(address _beneficiary, bool _disabled) external onlyOwner {
+    function disableVestingSchedule(address _beneficiary) external onlyOwner {
         VestingSchedule storage schedule = vestingSchedules[_beneficiary];
         require(schedule.startTime != 0, "No vesting schedule for beneficiary");
         require(!schedule.isDisabled, "Schedule already disabled");
-        require(_disabled, "Can only disable schedules");
 
         (uint256 totalVested, uint256 totalReleased, uint256 releasable) = getVestedAmount(_beneficiary);
         
@@ -492,4 +427,72 @@ contract FibonVesting is Ownable {
         return vestingSchedules[beneficiary].phases;
     }
 
+    /**
+     * @notice Internal function to create a vesting schedule for a beneficiary.
+     * @param _beneficiary The address of the beneficiary.
+     * @param _amount The total token allocation for the beneficiary.
+     * @param _typeId The ID of the vesting type to use.
+     * @param _startTime The start time of the vesting schedule.
+     */
+    function _createVestingSchedule(
+        address _beneficiary,
+        uint256 _amount,
+        uint8 _typeId,
+        uint256 _startTime
+    ) internal {
+        require(_beneficiary != address(0), "Beneficiary cannot be zero address");
+        require(_amount > 0, "Amount must be greater than 0");
+        require(vestingTypes[_typeId].length > 0, "Invalid vesting type");
+        require(vestingSchedules[_beneficiary].startTime == 0, "Vesting schedule already exists");
+        
+        VestingSchedule storage schedule = vestingSchedules[_beneficiary];
+        schedule.startTime = _startTime;
+        schedule.releasedAmount = 0;
+        schedule.isDisabled = false;
+        
+        VestingPhase[] storage phases = vestingTypes[_typeId];
+        for (uint256 i = 0; i < phases.length; i++) {
+            schedule.phases.push(phases[i]);
+        }
+        
+        totalAllocation[_beneficiary] = _amount;
+        totalAllocated += _amount;
+        
+        emit VestingScheduleCreated(_beneficiary, _amount);
+    }
+
+    /**
+     * @notice Allows the owner to create multiple vesting schedules in a single transaction.
+     * @dev Can only be called once by the owner.
+     * @param _beneficiaries Array of beneficiary addresses.
+     * @param _amounts Array of token allocations.
+     * @param _typeIds Array of vesting type IDs.
+     * @param _startTime The start time for all vesting schedules (0 for current time).
+     */
+    function initializeVestingSchedules(
+        address[] calldata _beneficiaries,
+        uint256[] calldata _amounts,
+        uint8[] calldata _typeIds,
+        uint256 _startTime
+    ) external onlyOwner {
+        require(!vestingInitialized, "Vesting already initialized");
+        require(_beneficiaries.length == _amounts.length, "Arrays length mismatch");
+        require(_beneficiaries.length == _typeIds.length, "Arrays length mismatch");
+        
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < _amounts.length; i++) {
+            totalAmount += _amounts[i];
+        }
+        
+        uint256 contractBalance = token.balanceOf(address(this));
+        require(contractBalance >= totalAllocated + totalAmount, "Insufficient token balance");
+        
+        uint256 startTime = _startTime == 0 ? block.timestamp : _startTime;
+        
+        for (uint256 i = 0; i < _beneficiaries.length; i++) {
+            _createVestingSchedule(_beneficiaries[i], _amounts[i], _typeIds[i], startTime);
+        }
+        
+        vestingInitialized = true;
+    }
 }
