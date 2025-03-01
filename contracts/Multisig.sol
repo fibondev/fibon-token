@@ -6,16 +6,17 @@ import "@openzeppelin/contracts/utils/Context.sol";
 /**
  * @title FibonMultiSig
  * @dev A multisignature wallet contract that allows multiple owners to confirm transactions before execution.
+ * @notice Once deployed, the set of owners cannot be changed.
  */
 contract FibonMultiSig is Context {
-    /// @notice List of wallet owners.
+    /// @notice List of wallet owners. This list is immutable after contract deployment.
     address[] public owners;
 
     /// @notice Mapping to check if an address is an owner.
     mapping(address => bool) public isOwner;
 
     /// @notice Number of required confirmations for transactions.
-    uint public required;
+    uint public immutable required;
 
     /// @notice Counter for transaction IDs.
     uint public transactionCount;
@@ -84,14 +85,16 @@ contract FibonMultiSig is Context {
 
     /**
      * @dev Initializes the contract by setting the owners and required number of confirmations.
-     * @param _owners List of initial owners.
+     * @param _owners List of initial owners. This list cannot be modified after deployment.
      * @param _required Number of required confirmations.
      */
     constructor(address[] memory _owners, uint _required) {
         require(_owners.length >= _required && _required > 0 && _owners.length > 0, "Invalid required number of owners");
         for (uint i = 0; i < _owners.length; i++) {
-            require(!isOwner[_owners[i]], "Duplicate owner");
-            isOwner[_owners[i]] = true;
+            address owner = _owners[i];
+            require(owner != address(0), "Invalid owner address: zero address");
+            require(!isOwner[owner], "Duplicate owner");
+            isOwner[owner] = true;
         }
         owners = _owners;
         required = _required;
