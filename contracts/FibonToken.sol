@@ -16,11 +16,17 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
     /// @notice Mapping of blacklisted addresses
     mapping(address => bool) public isBlacklisted;
 
-    /// @notice Fixed fee amount for transfers
-    uint256 public transferFee;
+    /// @notice Fee percentage for transfers (in basis points, 5 = 0.05%)
+    uint256 public transferFeePercent;
 
     /// @notice Address where fees are collected
     address public immutable feeCollector;
+
+    /// @notice Maximum token supply cap (5,882,000,000 tokens)
+    uint256 public constant MAX_SUPPLY = 5_882_000_000 * 10**18;
+
+    /// @notice Basis points denominator
+    uint256 private constant BASIS_POINTS = 10000;
 
     /// @notice Event emitted when an address is blacklisted
     event AddressBlacklisted(address indexed account);
@@ -28,8 +34,8 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
     /// @notice Event emitted when an address is removed from blacklist
     event AddressUnblacklisted(address indexed account);
 
-    /// @notice Event emitted when transfer fee is updated
-    event TransferFeeUpdated(uint256 oldFee, uint256 newFee);
+    /// @notice Event emitted when transfer fee percentage is updated
+    event TransferFeeUpdated(uint256 oldFeePercent, uint256 newFeePercent);
 
     /**
      * @dev Sets the token name, symbol, and initializes the permit functionality.
@@ -44,6 +50,7 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
     {
         require(_feeCollector != address(0), "Invalid fee collector");
         feeCollector = _feeCollector;
+        transferFeePercent = 5;
     }
 
     /**
@@ -54,17 +61,19 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
      */
     function mint(address to, uint256 amount) public onlyOwner {
         require(!isBlacklisted[to], "Recipient is blacklisted");
+        require(totalSupply() + amount <= MAX_SUPPLY, "Exceeds maximum token supply");
         _mint(to, amount);
     }
 
     /**
-     * @notice Sets the fixed transfer fee
-     * @param newFee The new fee amount in token units
+     * @notice Sets the transfer fee percentage (in basis points)
+     * @param newFeePercent The new fee percentage (e.g., 5 = 0.05%)
      */
-    function setTransferFee(uint256 newFee) external onlyOwner {
-        uint256 oldFee = transferFee;
-        transferFee = newFee;
-        emit TransferFeeUpdated(oldFee, newFee);
+    function setTransferFeePercent(uint256 newFeePercent) external onlyOwner {
+        require(newFeePercent <= 1000, "Fee cannot exceed 10%");
+        uint256 oldFeePercent = transferFeePercent;
+        transferFeePercent = newFeePercent;
+        emit TransferFeeUpdated(oldFeePercent, newFeePercent);
     }
 
     /**
@@ -98,10 +107,9 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
         require(!isBlacklisted[msg.sender], "Sender is blacklisted");
         require(!isBlacklisted[to], "Recipient is blacklisted");
 
-        if (transferFee > 0 && msg.sender != feeCollector) {
-            require(amount > transferFee, "Amount less than fee");
-            
-            uint256 feeAmount = transferFee;
+        if (transferFeePercent > 0 && msg.sender != feeCollector) {
+            uint256 feeAmount = (amount * transferFeePercent) / BASIS_POINTS;
+            require(feeAmount > 0, "Transfer amount too small");
             uint256 netAmount = amount - feeAmount;
             
             _transfer(msg.sender, feeCollector, feeAmount);
@@ -119,10 +127,9 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
         require(!isBlacklisted[from], "Sender is blacklisted");
         require(!isBlacklisted[to], "Recipient is blacklisted");
 
-        if (transferFee > 0 && from != feeCollector) {
-            require(amount > transferFee, "Amount too small for fee");
-            
-            uint256 feeAmount = transferFee;
+        if (transferFeePercent > 0 && from != feeCollector) {
+            uint256 feeAmount = (amount * transferFeePercent) / BASIS_POINTS;
+            require(feeAmount > 0, "Transfer amount too small");
             uint256 netAmount = amount - feeAmount;
 
             uint256 currentAllowance = allowance(from, msg.sender);
