@@ -19,9 +19,6 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
     /// @notice Fee percentage for transfers (in basis points, 5 = 0.05%)
     uint256 public transferFeePercent;
 
-    /// @notice Address where fees are collected
-    address public immutable feeCollector;
-
     /// @notice Maximum token supply cap (5,882,000,000 tokens)
     uint256 public constant MAX_SUPPLY = 5_882_000_000 * 10**18;
 
@@ -39,17 +36,14 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
 
     /**
      * @dev Sets the token name, symbol, and initializes the permit functionality.
-     * Also sets the initial owner and fee collector of the contract.
+     * Also sets the initial owner of the contract.
      * @param initialOwner The address of the initial owner of the token.
-     * @param _feeCollector The address that will receive transfer fees.
      */
-    constructor(address initialOwner, address _feeCollector)
+    constructor(address initialOwner)
         ERC20("FibonToken", "FIBON")
         ERC20Permit("FibonToken")
         Ownable(initialOwner)
     {
-        require(_feeCollector != address(0), "Invalid fee collector");
-        feeCollector = _feeCollector;
         transferFeePercent = 5;
     }
 
@@ -107,12 +101,12 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
         require(!isBlacklisted[msg.sender], "Sender is blacklisted");
         require(!isBlacklisted[to], "Recipient is blacklisted");
 
-        if (transferFeePercent > 0 && msg.sender != feeCollector) {
+        if (transferFeePercent > 0 && msg.sender != owner()) {
             uint256 feeAmount = (amount * transferFeePercent) / BASIS_POINTS;
             require(feeAmount > 0, "Transfer amount too small");
             uint256 netAmount = amount - feeAmount;
             
-            _transfer(msg.sender, feeCollector, feeAmount);
+            _transfer(msg.sender, owner(), feeAmount);
             _transfer(msg.sender, to, netAmount);
             return true;
         }
@@ -127,7 +121,7 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
         require(!isBlacklisted[from], "Sender is blacklisted");
         require(!isBlacklisted[to], "Recipient is blacklisted");
 
-        if (transferFeePercent > 0 && from != feeCollector) {
+        if (transferFeePercent > 0 && from != owner()) {
             uint256 feeAmount = (amount * transferFeePercent) / BASIS_POINTS;
             require(feeAmount > 0, "Transfer amount too small");
             uint256 netAmount = amount - feeAmount;
@@ -136,7 +130,7 @@ contract FibonToken is ERC20, ERC20Burnable, Ownable, ERC20Permit {
             require(currentAllowance >= amount, "Insufficient allowance");
             
             _spendAllowance(from, msg.sender, amount);
-            _transfer(from, feeCollector, feeAmount);
+            _transfer(from, owner(), feeAmount);
             _transfer(from, to, netAmount);
             return true;
         }
