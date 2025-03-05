@@ -29,7 +29,7 @@ describe("Fibon Token System", function () {
             console.log("MultiSig deployment confirmed");
 
             const FibonToken = await ethers.getContractFactory("FibonToken");
-            token = await FibonToken.deploy(await multisig.getAddress(), await multisig.getAddress());
+            token = await FibonToken.deploy(await multisig.getAddress());
             await token.waitForDeployment();
             tokenAddress = await token.getAddress();
             console.log("Token deployed at:", tokenAddress);
@@ -725,7 +725,7 @@ describe("Fibon Token System", function () {
             await multisig.waitForDeployment();
 
             const FibonToken = await ethers.getContractFactory("FibonToken");
-            token = await FibonToken.deploy(await multisig.getAddress(), await multisig.getAddress());
+            token = await FibonToken.deploy(await multisig.getAddress());
             await token.waitForDeployment();
             tokenAddress = await token.getAddress();
 
@@ -1242,7 +1242,7 @@ describe("Fibon Token System", function () {
 
         it("Should recover mistakenly sent tokens", async function () {
             const TestToken = await ethers.getContractFactory("FibonToken");
-            const testToken = await TestToken.deploy(await multisig.getAddress(), await multisig.getAddress());
+            const testToken = await TestToken.deploy(await multisig.getAddress());
             await testToken.waitForDeployment();
 
             const mintData = testToken.interface.encodeFunctionData(
@@ -1435,8 +1435,8 @@ describe("Fibon Token System", function () {
             
             await token.connect(addr4).transfer(addr5.address, transferAmount);
 
-            const feeCollector = await token.feeCollector();
-            const multisigBalance = await token.balanceOf(feeCollector);
+            const tokenOwner = await token.owner();
+            const ownerBalance = await token.balanceOf(tokenOwner);
             const recipientBalance = await token.balanceOf(addr5.address);
             const senderFinalBalance = await token.balanceOf(addr4.address);
 
@@ -1445,7 +1445,7 @@ describe("Fibon Token System", function () {
             const netAmount = transferAmount - feeAmount;
 
             expect(recipientBalance).to.equal(netAmount);
-            expect(multisigBalance).to.equal(feeAmount);
+            expect(ownerBalance).to.equal(feeAmount);
             expect(senderFinalBalance).to.equal(initialBalance - transferAmount);
         });
 
@@ -1466,8 +1466,8 @@ describe("Fibon Token System", function () {
             await token.connect(addr4).approve(addr5.address, transferAmount);
             await token.connect(addr5).transferFrom(addr4.address, addr6.address, transferAmount);
 
-            const feeCollector = await token.feeCollector();
-            const multisigBalance = await token.balanceOf(feeCollector);
+            const tokenOwner = await token.owner();
+            const ownerBalance = await token.balanceOf(tokenOwner);
             const recipientBalance = await token.balanceOf(addr6.address);
             const senderFinalBalance = await token.balanceOf(addr4.address);
 
@@ -1476,7 +1476,7 @@ describe("Fibon Token System", function () {
             const netAmount = transferAmount - feeAmount;
 
             expect(recipientBalance).to.equal(netAmount);
-            expect(multisigBalance).to.equal(feeAmount);
+            expect(ownerBalance).to.equal(feeAmount);
             expect(senderFinalBalance).to.equal(initialBalance - transferAmount);
         });
 
