@@ -398,8 +398,9 @@ contract FibonVesting is Ownable {
     }
 
     /**
-     * @notice Allows the owner to disable a vesting schedule and create a new one with remaining time.
-     * @dev Only the owner can call this function.
+     * @notice Allows the owner to disable a vesting schedule, release any currently vested tokens to the beneficiary, and revoke their claim to unvested tokens.
+     * @dev Only the owner can call this function. This will release any currently vested tokens
+     *      to the beneficiary and remove their claim to any unvested tokens.
      * @param _beneficiary The address of the beneficiary whose schedule is to be disabled.
      */
     function disableVestingSchedule(address _beneficiary) external onlyOwner {
