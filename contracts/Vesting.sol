@@ -421,7 +421,7 @@ contract FibonVesting is Ownable {
         totalAllocation[_beneficiary] = totalVested;
 
         if (remainingTokens > 0) {
-            token.safeTransfer(address(this), remainingTokens);
+            token.safeTransfer(owner(), remainingTokens);
         }
 
         schedule.isDisabled = true;
